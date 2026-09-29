@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Weekly put scanner</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📉</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;800&display=swap" rel="stylesheet">
+<script src="config.js"></script>
+<style>
+:root {
+  --bg: #EEF1F4; --surface: #FFFFFF; --ink: #14213D; --muted: #5C677D;
+  --rule: #C9D1DC; --accent: #0F7B6C; --accent-soft: #D5EDE9;
+  --bar: #9AA6BC; --risk: #B3261E; --risk-soft: #F6DEDC;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0E1626; --surface: #16213A; --ink: #E8EDF5; --muted: #9AA6BC;
+    --rule: #2A3754; --accent: #3FB8A3; --accent-soft: #143A36;
+    --bar: #4A5878; --risk: #F08A80; --risk-soft: #3A1E1E;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 400 16px/1.5 "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
+h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 20px; }
+h2 { font-size: 1rem; font-weight: 600; margin: 0 0 12px; }
+.muted { color: var(--muted); }
+.hidden { display: none !important; }
+
+/* controls */
+label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+input, select {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; width: 100%;
+}
+input:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+button {
+  font: inherit; font-weight: 600; cursor: pointer; border-radius: 6px;
+  padding: 9px 16px; border: 1px solid var(--ink); background: var(--ink); color: var(--bg);
+}
+button.secondary { background: transparent; color: var(--ink); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+
+.settings {
+  display: grid; gap: 12px; align-items: end;
+  grid-template-columns: 2fr 1fr 1fr 1fr auto;
+  padding-bottom: 24px; border-bottom: 1px solid var(--rule);
+}
+@media (max-width: 720px) { .settings { grid-template-columns: 1fr 1fr; } .settings .tick { grid-column: 1 / -1; } }
+
+/* verdict */
+.verdict { padding: 40px 0 8px; }
+.verdict .big { font-size: clamp(2rem, 5.5vw, 3.4rem); font-weight: 800; line-height: 1.08; letter-spacing: -.02em; margin: 0; }
+.verdict .sub { font-size: 1.1rem; color: var(--muted); margin: 12px 0 0; max-width: 62ch; }
+
+/* ranked bars */
+.bars { margin: 32px 0 40px; }
+.bar-row { display: grid; grid-template-columns: 64px 1fr 72px; gap: 14px; align-items: center; padding: 6px 0; }
+.bar-row .t { font-weight: 600; }
+.track { height: 28px; background: transparent; }
+.fill { height: 100%; background: var(--bar); border-radius: 0 4px 4px 0; transition: width .5s ease; }
+.bar-row.win .fill { background: var(--accent); }
+.bar-row .v { text-align: right; font-weight: 600; }
+.bar-row.win .v { color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+
+/* table */
+.table-wrap { overflow-x: auto; border-top: 1px solid var(--rule); }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: .92rem; }
+th, td { padding: 10px 8px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font-weight: 500; color: var(--muted); }
+th:first-child, td:first-child { text-align: left; }
+td svg { vertical-align: middle; }
+
+/* panels */
+.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px; }
+@media (max-width: 820px) { .panels { grid-template-columns: 1fr; } }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 20px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.pick { font-size: 1.4rem; font-weight: 800; margin: 16px 0 4px; }
+.risks { margin: 8px 0 0; padding-left: 18px; }
+.risks li { margin-bottom: 4px; }
+.notes { margin-top: 12px; font-size: .9rem; color: var(--muted); }
+.ticket-summary { background: var(--bg); border-radius: 6px; padding: 12px; margin: 12px 0; font-size: .95rem; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: .92rem; color: var(--ink); margin: 12px 0; }
+.check input { width: auto; margin-top: 4px; }
+.seg { display: flex; gap: 8px; }
+.seg label { display: flex; gap: 6px; align-items: center; color: var(--ink); margin: 0; font-size: .95rem; }
+.seg input { width: auto; }
+
+.msg { border-radius: 6px; padding: 10px 12px; margin: 12px 0 0; font-size: .92rem; }
+.msg.err { background: var(--risk-soft); color: var(--risk); }
+.msg.ok { background: var(--accent-soft); color: var(--accent); }
+.msg.info { background: var(--surface); border: 1px solid var(--rule); color: var(--muted); }
+
+/* login */
+.login { max-width: 360px; margin: 18vh auto 0; }
+.login p { color: var(--muted); }
+.login form { display: grid; gap: 12px; }
+
+footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70ch; }
+</style>
+</head>
+<body>
+
+<section id="login" class="login wrap hidden">
+  <h1>Weekly put scanner</h1>
+  <form id="login-form">
+    <div>
+      <label for="pw">Password</label>
+      <input id="pw" type="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" id="login-btn">Sign in</button>
+  </form>
+  <div id="login-msg"></div>
+</section>
+
+<main id="app" class="wrap hidden">
+  <h1>Weekly put scanner</h1>
+
+  <form id="scan-form" class="settings">
+    <div class="tick"><label for="tickers">Tickers</label><input id="tickers" value="NVDA, META, NVDL, SOXL"></div>
+    <div><label for="delta">Target delta</label><input id="delta" type="number" min="0.05" max="0.40" step="0.01" value="0.20"></div>
+    <div><label for="min-dte">Min days out</label><input id="min-dte" type="number" min="0" max="60" value="4"></div>
+    <div><label for="max-dte">Max days out</label><input id="max-dte" type="number" min="1" max="60" value="10"></div>
+    <button type="submit" id="scan-btn">Scan</button>
+  </form>
+  <div id="scan-msg"></div>
+
+  <section id="results" class="hidden">
+    <div class="verdict">
+      <p class="big" id="verdict-big"></p>
+      <p class="sub" id="verdict-sub"></p>
+    </div>
+
+    <div class="bars" id="bars" aria-label="Weekly premium as a percent of strike, highest first"></div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Ticker</th><th>Price</th><th>Strike</th><th>Expires</th><th>Delta</th><th>Bid</th>
+          <th>IV</th><th>Below price</th><th>Annualized</th><th>1 month</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="panels">
+      <div class="panel">
+        <h2>AI review</h2>
+        <div class="row">
+          <div><label for="provider">Provider</label><select id="provider"></select></div>
+          <div><label for="model">Model</label><input id="model"></div>
+        </div>
+        <button id="analyze-btn" class="secondary" type="button">Review with AI</button>
+        <div id="ai-out"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Order ticket</h2>
+        <div class="row">
+          <div><label for="o-ticker">Sell put on</label><select id="o-ticker"></select></div>
+          <div><label for="o-qty">Contracts</label><input id="o-qty" type="number" min="1" value="1"></div>
+        </div>
+        <div class="row">
+          <div><label for="o-limit">Limit price per share</label><input id="o-limit" type="number" min="0.01" step="0.01"></div>
+          <div><label>Account</label>
+            <div class="seg" id="o-account">
+              <label><input type="radio" name="acct" value="paper" checked> Paper</label>
+              <label id="live-opt" class="hidden"><input type="radio" name="acct" value="live"> Live</label>
+            </div>
+          </div>
+        </div>
+        <div class="ticket-summary" id="o-summary"></div>
+        <label class="check"><input type="checkbox" id="o-confirm"> I've checked this against my broker and want to place it.</label>
+        <button id="order-btn" type="button" disabled>Place order</button>
+        <div id="order-msg"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Data from Yahoo Finance, delayed about 15 minutes. Delta is calculated from Yahoo's implied volatility.
+    The AI only reviews; strike, size, and price come from the scan and your inputs.
+    Leveraged ETFs pay more because they can gap through the strike. Not financial advice.
+    <br><button class="secondary" id="logout" type="button" style="margin-top:12px">Sign out</button>
+  </footer>
+</main>
+
+<script>
+const API = (window.API_URL || "").replace(/\/$/, "");
+const $ = (s) => document.querySelector(s);
+let token = "";
+try { token = sessionStorage.getItem("ps_pw") || ""; } catch (e) {}
+let cfg = null, results = [], scannedAt = 0;
+
+// ---------- helpers ----------
+const pct = (x, d = 2) => (x * 100).toFixed(d) + "%";
+const usd = (x, d = 2) => "$" + Number(x).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtDate = (s) => new Date(s + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const roundPrice = (p) => { const t = p < 3 ? 0.01 : 0.05; return Math.max(t, Math.round(p / t) * t).toFixed(2); };
+
+function msg(el, text, kind = "err") {
+  el.innerHTML = "";
+  if (!text) return;
+  const d = document.createElement("div");
+  d.className = "msg " + kind;
+  d.textContent = text;
+  el.appendChild(d);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+  });
+  let body = null;
+  try { body = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    const d = body && body.detail;
+    const text = typeof d === "string" ? d : d ? JSON.stringify(d) : `${res.status} ${res.statusText}`;
+    const err = new Error(text); err.status = res.status; throw err;
+  }
+  return body;
+}
+
+function sparkline(vals) {
+  if (!vals || vals.length < 2) return "";
+  const w = 88, h = 24, min = Math.min(...vals), max = Math.max(...vals), span = max - min || 1;
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1) * w).toFixed(1)},${(h - (v - min) / span * (h - 2) - 1).toFixed(1)}`).join(" ");
+  const up = vals[vals.length - 1] >= vals[0];
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${up ? "var(--accent)" : "var(--risk)"}" stroke-width="1.5"/></svg>`;
+}
+
+// ---------- login ----------
+async function tryLogin(pw) {
+  token = pw;
+  const slow = setTimeout(() => msg($("#login-msg"), "Waking the server. This can take up to a minute on Render's free plan.", "info"), 2500);
+  try {
+    cfg = await api("/config");
+    try { sessionStorage.setItem("ps_pw", pw); } catch (e) {}
+    showApp();
+  } catch (e) {
+    try { sessionStorage.removeItem("ps_pw"); } catch (x) {}
+    $("#login").classList.remove("hidden");
+    $("#app").classList.add("hidden");
+    msg($("#login-msg"), e.status === 401 ? "Wrong password." : "Couldn't reach the server: " + e.message);
+  } finally { clearTimeout(slow); }
+}
+
+$("#login-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("#login-btn").disabled = true;
+  await tryLogin($("#pw").value);
+  $("#login-btn").disabled = false;
+});
+
+$("#logout").addEventListener("click", () => {
+  try { sessionStorage.removeItem("ps_pw"); } catch (e) {}
+  location.reload();
+});
+
+function showApp() {
+  $("#login").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  const sel = $("#provider");
+  sel.innerHTML = "";
+  cfg.providers.forEach((p) => {
+    const o = document.createElement("option");
+    o.value = p.name; o.textContent = p.name; o.dataset.model = p.default_model;
+    sel.appendChild(o);
+  });
+  const hosted = [...sel.options].find((o) => !o.value.startsWith("Ollama"));
+  if (hosted) sel.value = hosted.value; // Ollama only works on your own computer
+  $("#model").value = sel.selectedOptions[0].dataset.model;
+  $("#o-qty").max = cfg.max_contracts;
+  $("#live-opt").classList.toggle("hidden", !cfg.live_allowed);
+}
+$("#provider").addEventListener("change", (e) => { $("#model").value = e.target.selectedOptions[0].dataset.model; });
+
+// ---------- scan ----------
+$("#scan-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const btn = $("#scan-btn");
+  btn.disabled = true; btn.textContent = "Scanning…";
+  msg($("#scan-msg"), "");
+  try {
+    const data = await api("/scan", {
+      method: "POST",
+      body: JSON.stringify({
+        tickers: $("#tickers").value.split(",").map((t) => t.trim()).filter(Boolean),
+        delta: parseFloat($("#delta").value),
+        min_dte: parseInt($("#min-dte").value, 10),
+        max_dte: parseInt($("#max-dte").value, 10),
+      }),
+    });
+    results = data.results; scannedAt = Date.now();
+    if (data.errors.length) msg($("#scan-msg"), data.errors.join(" · "), "info");
+    if (!results.length) { $("#results").classList.add("hidden"); msg($("#scan-msg"), "No results. Check the tickers or widen the days-out range."); return; }
+    renderResults();
+  } catch (e) {
+    msg($("#scan-msg"), e.message);
+  } finally { btn.disabled = false; btn.textContent = "Scan"; }
+});
+
+function renderResults() {
+  const top = results[0];
+  $("#verdict-big").textContent = `${top.ticker} pays ${pct(top.yield)} this week`;
+  $("#verdict-sub").textContent =
+    `Sell the ${usd(top.strike, top.strike % 1 ? 2 : 0)} put expiring ${fmtDate(top.expiry)} for about ${usd(top.premium, 0)} per contract ` +
+    `on ${usd(top.collateral, 0)} collateral. That's ${pct(top.otm, 1)} below today's price, ${pct(top.annualized, 0)} annualized.`;
+
+  const max = Math.max(...results.map((r) => r.yield));
+  $("#bars").innerHTML = results.map((r, i) => `
+    <div class="bar-row${i === 0 ? " win" : ""}">
+      <span class="t">${r.ticker}</span>
+      <div class="track"><div class="fill" style="width:0"></div></div>
+      <span class="v">${pct(r.yield)}</span>
+    </div>`).join("");
+  requestAnimationFrame(() => document.querySelectorAll("#bars .fill").forEach((f, i) => { f.style.width = (results[i].yield / max * 100) + "%"; }));
+
+  $("#tbody").innerHTML = results.map((r) => `
+    <tr>
+      <td><strong>${r.ticker}</strong></td><td>${usd(r.price)}</td><td>${usd(r.strike)}</td>
+      <td>${fmtDate(r.expiry)} <span class="muted">(${r.dte}d)</span></td><td>${r.delta.toFixed(2)}</td>
+      <td>${usd(r.bid)}</td><td>${pct(r.iv, 0)}</td><td>${pct(r.otm, 1)}</td><td>${pct(r.annualized, 0)}</td>
+      <td>${sparkline(r.trend)} <span class="muted">${(r.change_1m >= 0 ? "+" : "") + pct(r.change_1m, 1)}</span></td>
+    </tr>`).join("");
+
+  const sel = $("#o-ticker");
+  sel.innerHTML = results.map((r) => `<option value="${r.ticker}">${r.ticker} ${usd(r.strike)} put</option>`).join("");
+  $("#ai-out").innerHTML = "";
+  msg($("#order-msg"), "");
+  selectTicket(top.ticker);
+  $("#results").classList.remove("hidden");
+}
+
+// ---------- AI ----------
+$("#analyze-btn").addEventListener("click", async () => {
+  const btn = $("#analyze-btn"), out = $("#ai-out");
+  btn.disabled = true; btn.textContent = "Reviewing…";
+  msg(out, "");
+  try {
+    const a = await api("/analyze", {
+      method: "POST",
+      body: JSON.stringify({ provider: $("#provider").value, model: $("#model").value, rows: results }),
+    });
+    out.innerHTML = "";
+    const pick = document.createElement("p"); pick.className = "pick";
+    pick.textContent = a.pick === "NONE" ? "No pick this week" : `Pick: ${a.pick}`;
+    const conf = document.createElement("p"); conf.className = "muted"; conf.style.margin = "0";
+    conf.textContent = `${a.confidence || "unknown"} confidence`;
+    const sum = document.createElement("p"); sum.textContent = a.summary || "";
+    out.append(pick, conf, sum);
+    if (a.risks && a.risks.length) {
+      const ul = document.createElement("ul"); ul.className = "risks";
+      a.risks.forEach((r) => { const li = document.createElement("li"); li.textContent = r; ul.appendChild(li); });
+      out.appendChild(ul);
+    }
+    if (a.per_ticker) {
+      const n = document.createElement("div"); n.className = "notes";
+      Object.entries(a.per_ticker).forEach(([t, note]) => { const p = document.createElement("div"); p.textContent = `${t}: ${note}`; n.appendChild(p); });
+      out.appendChild(n);
+    }
+    if (results.some((r) => r.ticker === a.pick)) selectTicket(a.pick);
+  } catch (e) { msg(out, e.message); }
+  finally { btn.disabled = false; btn.textContent = "Review with AI"; }
+});
+
+// ---------- order ticket ----------
+function current() { return results.find((r) => r.ticker === $("#o-ticker").value); }
+function account() { return document.querySelector('input[name="acct"]:checked').value; }
+
+function selectTicket(ticker) {
+  $("#o-ticker").value = ticker;
+  $("#o-limit").value = roundPrice(current().mid);
+  $("#o-confirm").checked = false;
+  updateTicket();
+}
+
+function updateTicket() {
+  const r = current(); if (!r) return;
+  const qty = Math.max(1, Math.min(parseInt($("#o-qty").value, 10) || 1, cfg.max_contracts));
+  const limit = parseFloat($("#o-limit").value) || 0;
+  const stale = Date.now() - scannedAt > cfg.stale_seconds * 1000;
+  $("#o-summary").textContent =
+    `Sell to open ${qty} × ${r.contract} (${r.ticker} ${usd(r.strike)} put, expires ${fmtDate(r.expiry)}) at ${usd(limit)} limit. ` +
+    `Collects about ${usd(limit * 100 * qty, 0)} and ties up ${usd(r.strike * 100 * qty, 0)} in ${account()} account collateral.`;
+  $("#order-btn").disabled = stale || !$("#o-confirm").checked || limit <= 0;
+  if (stale) msg($("#order-msg"), "Quotes are over 5 minutes old. Scan again before placing an order.", "info");
+}
+
+["#o-ticker"].forEach((s) => $(s).addEventListener("change", () => selectTicket($("#o-ticker").value)));
+["#o-qty", "#o-limit", "#o-confirm"].forEach((s) => $(s).addEventListener("input", updateTicket));
+document.querySelectorAll('input[name="acct"]').forEach((el) => el.addEventListener("change", () => { $("#o-confirm").checked = false; updateTicket(); }));
+setInterval(() => { if (results.length) updateTicket(); }, 15000);
+
+$("#order-btn").addEventListener("click", async () => {
+  const r = current(), btn = $("#order-btn");
+  const qty = parseInt($("#o-qty").value, 10);
+  btn.disabled = true; btn.textContent = "Placing…";
+  try {
+    const o = await api("/order", {
+      method: "POST",
+      body: JSON.stringify({ contract: r.contract, qty, limit: parseFloat($("#o-limit").value), account: account() }),
+    });
+    msg($("#order-msg"), `Order placed in ${o.account}: ${o.id} (${o.status})`, "ok");
+    $("#o-confirm").checked = false;
+  } catch (e) { msg($("#order-msg"), e.message); }
+  finally { btn.textContent = "Place order"; updateTicket(); }
+});
+
+// ---------- start ----------
+if (token) tryLogin(token); else $("#login").classList.remove("hidden");
+</script>
+</body>
+</html>

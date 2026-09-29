@@ -1,0 +1,11 @@
+streamlit>=1.36
+yfinance>=0.2.40
+pandas
+altair
+requests
+python-dotenv
+anthropic
+google-genai
+alpaca-py>=0.30
+fastapi>=0.110
+uvicorn[standard]>=0.29
