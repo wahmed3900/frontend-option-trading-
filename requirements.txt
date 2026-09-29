@@ -9,3 +9,8 @@ google-genai
 alpaca-py>=0.30
 fastapi>=0.110
 uvicorn[standard]>=0.29
+flask>=3.0
+yfinance>=0.2.40
+anthropic
+google-genai
+alpaca-py>=0.30
