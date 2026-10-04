@@ -159,7 +159,7 @@ def ask_claude(prompt, model):
 def providers():
     p = {}
     if os.getenv("GEMINI_API_KEY"):
-        p["Gemini"] = (ask_gemini, "gemini-2.5-flash")
+        p["Gemini"] = (ask_gemini, "gemini-3.8-flash")
     if os.getenv("ANTHROPIC_API_KEY"):
         p["Claude"] = (ask_claude, "claude-haiku-4-5")
     return p
