@@ -408,6 +408,13 @@ td svg { vertical-align: middle; }
 .msg.info { background: var(--surface); border: 1px solid var(--rule); color: var(--muted); }
 
 
+/* manual order at another broker */
+.manual { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--rule); }
+.manual h3 { font-size: .95rem; font-weight: 600; margin: 0 0 4px; }
+.manual dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 12px 0; font-size: .95rem; }
+.manual dt { color: var(--muted); }
+.manual dd { margin: 0; font-weight: 600; }
+
 footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70ch; }
 </style>
 </head>
@@ -474,6 +481,14 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
         <label class="check"><input type="checkbox" id="o-confirm"> I've checked this against my broker and want to place it.</label>
         <button id="order-btn" type="button" disabled>Place order</button>
         <div id="order-msg"></div>
+
+        <div class="manual">
+          <h3>How to place this at Robinhood / Fidelity</h3>
+          <p class="muted" style="margin:0;font-size:.9rem">Open the ticker's options chain in their app and enter these. Needs options approval for cash-secured puts.</p>
+          <dl id="m-fields"></dl>
+          <button id="m-copy" class="secondary" type="button">Copy order details</button>
+          <div id="m-msg"></div>
+        </div>
       </div>
     </div>
   </section>
@@ -658,9 +673,48 @@ function updateTicket() {
   $("#o-summary").textContent =
     `Sell to open ${qty} × ${r.contract} (${r.ticker} ${usd(r.strike)} put, expires ${fmtDate(r.expiry)}) at ${usd(limit)} limit. ` +
     `Collects about ${usd(limit * 100 * qty, 0)} and ties up ${usd(r.strike * 100 * qty, 0)} in ${account()} account collateral.`;
+  updateManual();
   $("#order-btn").disabled = stale || !$("#o-confirm").checked || limit <= 0 || !$("#o-pw").value;
   if (stale) msg($("#order-msg"), "Quotes are over 5 minutes old. Scan again before placing an order.", "info");
 }
+
+// Same order, written the way you'd enter it by hand at Robinhood or Fidelity
+function manualFields() {
+  const r = current(); if (!r) return [];
+  const qty = Math.max(1, Math.min(parseInt($("#o-qty").value, 10) || 1, cfg.max_contracts));
+  const limit = parseFloat($("#o-limit").value) || 0;
+  const longDate = new Date(r.expiry + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return [
+    ["Ticker", r.ticker],
+    ["Expiration", longDate],
+    ["Strike", usd(r.strike)],
+    ["Type", "Put"],
+    ["Action", "Sell to open (Robinhood: Sell)"],
+    ["Contracts", String(qty)],
+    ["Order type", `Limit at ${usd(limit)} per share`],
+    ["Time in force", "Day (good for day)"],
+    ["Cash needed", usd(r.strike * 100 * qty, 0)],
+  ];
+}
+
+function updateManual() {
+  const dl = $("#m-fields"); dl.innerHTML = "";
+  manualFields().forEach(([k, v]) => {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    dl.append(dt, dd);
+  });
+}
+
+$("#m-copy").addEventListener("click", async () => {
+  const text = manualFields().map(([k, v]) => `${k}: ${v}`).join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    msg($("#m-msg"), "Copied. Paste it into a note next to your broker app.", "ok");
+  } catch (e) {
+    msg($("#m-msg"), "Couldn't copy automatically. Select the details above and copy them.", "info");
+  }
+});
 
 ["#o-ticker"].forEach((s) => $(s).addEventListener("change", () => selectTicket($("#o-ticker").value)));
 ["#o-qty", "#o-limit", "#o-pw", "#o-confirm"].forEach((s) => $(s).addEventListener("input", updateTicket));
