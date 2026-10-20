@@ -106,34 +106,17 @@ td svg { vertical-align: middle; }
 .msg.ok { background: var(--accent-soft); color: var(--accent); }
 .msg.info { background: var(--surface); border: 1px solid var(--rule); color: var(--muted); }
 
-/* login */
-.login { max-width: 360px; margin: 18vh auto 0; }
-.login p { color: var(--muted); }
-.login form { display: grid; gap: 12px; }
-
 footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70ch; }
 </style>
 </head>
 <body>
 
-<section id="login" class="login wrap hidden">
-  <h1>Weekly put scanner</h1>
-  <form id="login-form">
-    <div>
-      <label for="pw">Password</label>
-      <input id="pw" type="password" autocomplete="current-password" required>
-    </div>
-    <button type="submit" id="login-btn">Sign in</button>
-  </form>
-  <div id="login-msg"></div>
-</section>
-
-<main id="app" class="wrap hidden">
+<main id="app" class="wrap">
   <h1>Weekly put scanner</h1>
 
   <form id="scan-form" class="settings">
-    <div class="tick"><label for="tickers">Tickers</label><input id="tickers" value="NVDA, META, NVDL, SOXL"></div>
-    <div><label for="delta">Target delta</label><input id="delta" type="number" min="0.05" max="0.40" step="0.01" value="0.20"></div>
+    <div class="tick"><label for="tickers">Tickers</label><input id="tickers" value="NVDA, NVDL, NVDX, SOXL, TQQQ, SPXL"></div>
+    <div><label for="delta">Target delta</label><input id="delta" type="number" min="0.05" max="0.40" step="0.01" value="0.15"></div>
     <div><label for="min-dte">Min days out</label><input id="min-dte" type="number" min="0" max="60" value="4"></div>
     <div><label for="max-dte">Max days out</label><input id="max-dte" type="number" min="1" max="60" value="10"></div>
     <button type="submit" id="scan-btn">Scan</button>
@@ -196,15 +179,12 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
     Data from Yahoo Finance, delayed about 15 minutes. Delta is calculated from Yahoo's implied volatility.
     The AI only reviews; strike, size, and price come from the scan and your inputs.
     Leveraged ETFs pay more because they can gap through the strike. Not financial advice.
-    <br><button class="secondary" id="logout" type="button" style="margin-top:12px">Sign out</button>
   </footer>
 </main>
 
 <script>
 const API = (window.API_URL || "").replace(/\/$/, "");
 const $ = (s) => document.querySelector(s);
-let token = "";
-try { token = sessionStorage.getItem("ps_pw") || ""; } catch (e) {}
 let cfg = null, results = [], scannedAt = 0;
 
 // ---------- helpers ----------
@@ -225,7 +205,7 @@ function msg(el, text, kind = "err") {
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
     ...opts,
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " },
   });
   let body = null;
   try { body = await res.json(); } catch (e) {}
@@ -245,49 +225,29 @@ function sparkline(vals) {
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${up ? "var(--accent)" : "var(--risk)"}" stroke-width="1.5"/></svg>`;
 }
 
-// ---------- login ----------
-async function tryLogin(pw) {
-  token = pw;
-  const slow = setTimeout(() => msg($("#login-msg"), "Waking the server. This can take up to a minute on Render's free plan.", "info"), 2500);
+// ---------- startup ----------
+async function init() {
+  const slow = setTimeout(() => msg($("#scan-msg"), "Waking the server. This can take up to a minute on Render's free plan.", "info"), 2500);
   try {
     cfg = await api("/config");
-    try { sessionStorage.setItem("ps_pw", pw); } catch (e) {}
-    showApp();
+    clearTimeout(slow);
+    msg($("#scan-msg"), "");
+    const sel = $("#provider");
+    sel.innerHTML = "";
+    cfg.providers.forEach((p) => {
+      const o = document.createElement("option");
+      o.value = p.name; o.textContent = p.name; o.dataset.model = p.default_model;
+      sel.appendChild(o);
+    });
+    const hosted = [...sel.options].find((o) => !o.value.startsWith("Ollama"));
+    if (hosted) sel.value = hosted.value;
+    $("#model").value = sel.selectedOptions[0].dataset.model;
+    $("#o-qty").max = cfg.max_contracts;
+    $("#live-opt").classList.toggle("hidden", !cfg.live_allowed);
   } catch (e) {
-    try { sessionStorage.removeItem("ps_pw"); } catch (x) {}
-    $("#login").classList.remove("hidden");
-    $("#app").classList.add("hidden");
-    msg($("#login-msg"), e.status === 401 ? "Wrong password." : "Couldn't reach the server: " + e.message);
-  } finally { clearTimeout(slow); }
-}
-
-$("#login-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  $("#login-btn").disabled = true;
-  await tryLogin($("#pw").value);
-  $("#login-btn").disabled = false;
-});
-
-$("#logout").addEventListener("click", () => {
-  try { sessionStorage.removeItem("ps_pw"); } catch (e) {}
-  location.reload();
-});
-
-function showApp() {
-  $("#login").classList.add("hidden");
-  $("#app").classList.remove("hidden");
-  const sel = $("#provider");
-  sel.innerHTML = "";
-  cfg.providers.forEach((p) => {
-    const o = document.createElement("option");
-    o.value = p.name; o.textContent = p.name; o.dataset.model = p.default_model;
-    sel.appendChild(o);
-  });
-  const hosted = [...sel.options].find((o) => !o.value.startsWith("Ollama"));
-  if (hosted) sel.value = hosted.value; // Ollama only works on your own computer
-  $("#model").value = sel.selectedOptions[0].dataset.model;
-  $("#o-qty").max = cfg.max_contracts;
-  $("#live-opt").classList.toggle("hidden", !cfg.live_allowed);
+    clearTimeout(slow);
+    msg($("#scan-msg"), "Couldn't reach the server: " + e.message);
+  }
 }
 $("#provider").addEventListener("change", (e) => { $("#model").value = e.target.selectedOptions[0].dataset.model; });
 
@@ -424,7 +384,7 @@ $("#order-btn").addEventListener("click", async () => {
 });
 
 // ---------- start ----------
-if (token) tryLogin(token); else $("#login").classList.remove("hidden");
+init();
 </script>
 </body>
 </html>
