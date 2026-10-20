@@ -3,7 +3,7 @@ Weekly put scanner — the whole app in one file (page + API), Flask on Vercel.
 
 Vercel: set Application Preset to "Flask". Add these in
 Settings → Environment Variables, then redeploy:
-  APP_PASSWORD                      (required)
+  APP_PASSWORD                      (required to place orders; scanning is open)
   GEMINI_API_KEY and/or ANTHROPIC_API_KEY
   ALPACA_API_KEY, ALPACA_SECRET_KEY (paper keys to start)
   MAX_CONTRACTS=1, MAX_COLLATERAL_PCT=0.25, LIVE_TRADING=false
@@ -189,7 +189,6 @@ def health():
 
 
 @app.get("/api/config")
-@require_password
 def config():
     return jsonify({
         "providers": [{"name": n, "default_model": m} for n, (_, m) in providers().items()],
@@ -201,7 +200,6 @@ def config():
 
 
 @app.post("/api/scan")
-@require_password
 def scan():
     body = request.get_json(silent=True) or {}
     tickers = [str(t).strip().upper() for t in body.get("tickers", []) if str(t).strip()][:12]
@@ -224,7 +222,6 @@ def scan():
 
 
 @app.post("/api/analyze")
-@require_password
 def analyze():
     body = request.get_json(silent=True) or {}
     p = providers()
@@ -410,29 +407,13 @@ td svg { vertical-align: middle; }
 .msg.ok { background: var(--accent-soft); color: var(--accent); }
 .msg.info { background: var(--surface); border: 1px solid var(--rule); color: var(--muted); }
 
-/* login */
-.login { max-width: 360px; margin: 18vh auto 0; }
-.login p { color: var(--muted); }
-.login form { display: grid; gap: 12px; }
 
 footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70ch; }
 </style>
 </head>
 <body>
 
-<section id="login" class="login wrap hidden">
-  <h1>Weekly put scanner</h1>
-  <form id="login-form">
-    <div>
-      <label for="pw">Password</label>
-      <input id="pw" type="password" autocomplete="current-password" required>
-    </div>
-    <button type="submit" id="login-btn">Sign in</button>
-  </form>
-  <div id="login-msg"></div>
-</section>
-
-<main id="app" class="wrap hidden">
+<main id="app" class="wrap">
   <h1>Weekly put scanner</h1>
 
   <form id="scan-form" class="settings">
@@ -489,6 +470,7 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
           </div>
         </div>
         <div class="ticket-summary" id="o-summary"></div>
+        <div><label for="o-pw">Order password</label><input id="o-pw" type="password" autocomplete="current-password"></div>
         <label class="check"><input type="checkbox" id="o-confirm"> I've checked this against my broker and want to place it.</label>
         <button id="order-btn" type="button" disabled>Place order</button>
         <div id="order-msg"></div>
@@ -501,15 +483,12 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
     The AI only reviews; strike, size, and price come from the scan and your inputs.
     Leveraged ETFs pay more because they can gap through the strike. Not financial advice.
     <br>Need a brokerage account? <a href="https://www.fidelity.com/open-account/overview" target="_blank" rel="noopener noreferrer" style="color:inherit">Open one at Fidelity ↗</a>
-    <br><button class="secondary" id="logout" type="button" style="margin-top:12px">Sign out</button>
   </footer>
 </main>
 
 <script>
 const API = "/api"; // same site on Vercel
 const $ = (s) => document.querySelector(s);
-let token = "";
-try { token = sessionStorage.getItem("ps_pw") || ""; } catch (e) {}
 let cfg = null, results = [], scannedAt = 0;
 
 // ---------- helpers ----------
@@ -527,11 +506,11 @@ function msg(el, text, kind = "err") {
   el.appendChild(d);
 }
 
-async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
-  });
+// Only placing an order needs the password; everything else is open.
+async function api(path, opts = {}, password = "") {
+  const headers = { "Content-Type": "application/json" };
+  if (password) headers.Authorization = "Bearer " + password;
+  const res = await fetch(API + path, { ...opts, headers });
   let body = null;
   try { body = await res.json(); } catch (e) {}
   if (!res.ok) {
@@ -550,37 +529,7 @@ function sparkline(vals) {
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${up ? "var(--accent)" : "var(--risk)"}" stroke-width="1.5"/></svg>`;
 }
 
-// ---------- login ----------
-async function tryLogin(pw) {
-  token = pw;
-  const slow = setTimeout(() => msg($("#login-msg"), "Starting up…", "info"), 2500);
-  try {
-    cfg = await api("/config");
-    try { sessionStorage.setItem("ps_pw", pw); } catch (e) {}
-    showApp();
-  } catch (e) {
-    try { sessionStorage.removeItem("ps_pw"); } catch (x) {}
-    $("#login").classList.remove("hidden");
-    $("#app").classList.add("hidden");
-    msg($("#login-msg"), e.status === 401 ? "Wrong password." : "Couldn't reach the server: " + e.message);
-  } finally { clearTimeout(slow); }
-}
-
-$("#login-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  $("#login-btn").disabled = true;
-  await tryLogin($("#pw").value);
-  $("#login-btn").disabled = false;
-});
-
-$("#logout").addEventListener("click", () => {
-  try { sessionStorage.removeItem("ps_pw"); } catch (e) {}
-  location.reload();
-});
-
 function showApp() {
-  $("#login").classList.add("hidden");
-  $("#app").classList.remove("hidden");
   const sel = $("#provider");
   sel.innerHTML = "";
   cfg.providers.forEach((p) => {
@@ -709,12 +658,12 @@ function updateTicket() {
   $("#o-summary").textContent =
     `Sell to open ${qty} × ${r.contract} (${r.ticker} ${usd(r.strike)} put, expires ${fmtDate(r.expiry)}) at ${usd(limit)} limit. ` +
     `Collects about ${usd(limit * 100 * qty, 0)} and ties up ${usd(r.strike * 100 * qty, 0)} in ${account()} account collateral.`;
-  $("#order-btn").disabled = stale || !$("#o-confirm").checked || limit <= 0;
+  $("#order-btn").disabled = stale || !$("#o-confirm").checked || limit <= 0 || !$("#o-pw").value;
   if (stale) msg($("#order-msg"), "Quotes are over 5 minutes old. Scan again before placing an order.", "info");
 }
 
 ["#o-ticker"].forEach((s) => $(s).addEventListener("change", () => selectTicket($("#o-ticker").value)));
-["#o-qty", "#o-limit", "#o-confirm"].forEach((s) => $(s).addEventListener("input", updateTicket));
+["#o-qty", "#o-limit", "#o-pw", "#o-confirm"].forEach((s) => $(s).addEventListener("input", updateTicket));
 document.querySelectorAll('input[name="acct"]').forEach((el) => el.addEventListener("change", () => { $("#o-confirm").checked = false; updateTicket(); }));
 setInterval(() => { if (results.length) updateTicket(); }, 15000);
 
@@ -726,15 +675,19 @@ $("#order-btn").addEventListener("click", async () => {
     const o = await api("/order", {
       method: "POST",
       body: JSON.stringify({ contract: r.contract, qty, limit: parseFloat($("#o-limit").value), account: account(), ticket: r.ticket }),
-    });
+    }, $("#o-pw").value);
     msg($("#order-msg"), `Order placed in ${o.account}: ${o.id} (${o.status})`, "ok");
     $("#o-confirm").checked = false;
-  } catch (e) { msg($("#order-msg"), e.message); }
+  } catch (e) { msg($("#order-msg"), e.status === 401 ? "Wrong order password." : e.message); }
   finally { btn.textContent = "Place order"; updateTicket(); }
 });
 
 // ---------- start ----------
-if (token) tryLogin(token); else $("#login").classList.remove("hidden");
+const slow = setTimeout(() => msg($("#scan-msg"), "Starting up…", "info"), 2500);
+api("/config")
+  .then((c) => { cfg = c; showApp(); msg($("#scan-msg"), ""); })
+  .catch((e) => msg($("#scan-msg"), "Couldn't reach the server: " + e.message))
+  .finally(() => clearTimeout(slow));
 </script>
 </body>
 </html>
