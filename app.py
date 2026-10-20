@@ -207,7 +207,7 @@ def scan():
     tickers = [str(t).strip().upper() for t in body.get("tickers", []) if str(t).strip()][:12]
     if not tickers:
         return fail(400, "Enter at least one ticker.")
-    delta = min(max(num(body.get("delta"), 0.20), 0.05), 0.40)
+    delta = min(max(num(body.get("delta"), 0.15), 0.05), 0.40)
     min_dte = int(min(max(num(body.get("min_dte"), 4), 0), 60))
     max_dte = int(min(max(num(body.get("max_dte"), 10), 1), 60))
 
@@ -436,8 +436,8 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
   <h1>Weekly put scanner</h1>
 
   <form id="scan-form" class="settings">
-    <div class="tick"><label for="tickers">Tickers</label><input id="tickers" value="NVDA, META, NVDL, SOXL"></div>
-    <div><label for="delta">Target delta</label><input id="delta" type="number" min="0.05" max="0.40" step="0.01" value="0.20"></div>
+    <div class="tick"><label for="tickers">Tickers</label><input id="tickers" value="NVDA, NVDL, NVDX, SOXL, TQQQ, SPXL"></div>
+    <div><label for="delta">Target delta</label><input id="delta" type="number" min="0.05" max="0.40" step="0.01" value="0.15"></div>
     <div><label for="min-dte">Min days out</label><input id="min-dte" type="number" min="0" max="60" value="4"></div>
     <div><label for="max-dte">Max days out</label><input id="max-dte" type="number" min="1" max="60" value="10"></div>
     <button type="submit" id="scan-btn">Scan</button>
