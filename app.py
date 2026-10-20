@@ -500,6 +500,7 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
     Data from Yahoo Finance, delayed about 15 minutes. Delta is calculated from Yahoo's implied volatility.
     The AI only reviews; strike, size, and price come from the scan and your inputs.
     Leveraged ETFs pay more because they can gap through the strike. Not financial advice.
+    <br>Need a brokerage account? <a href="https://www.fidelity.com/open-account/overview" target="_blank" rel="noopener noreferrer" style="color:inherit">Open one at Fidelity ↗</a>
     <br><button class="secondary" id="logout" type="button" style="margin-top:12px">Sign out</button>
   </footer>
 </main>
