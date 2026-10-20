@@ -1,11 +1,10 @@
-
+streamlit>=1.36
+yfinance>=0.2.40
+altair
 requests
 python-dotenv
 anthropic
 google-genai
 alpaca-py>=0.30
-flask>=3.0
-yfinance>=0.2.40
-anthropic
-google-genai
-alpaca-py>=0.30
+pandas
+robin_stocks
