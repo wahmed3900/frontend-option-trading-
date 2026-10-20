@@ -2,11 +2,13 @@
 Put scanner API — runs on Render, called by the Vercel frontend.
 
 Start:  uvicorn api:app --host 0.0.0.0 --port $PORT
-Env:    APP_PASSWORD (required), ALLOWED_ORIGINS (your Vercel URL),
-        GEMINI_API_KEY / ANTHROPIC_API_KEY, ALPACA_API_KEY / ALPACA_SECRET_KEY,
+Env:    ALLOWED_ORIGINS (your Vercel URL),
+        GEMINI_API_KEY / ANTHROPIC_API_KEY,
+        BROKER=robinhood (default: alpaca)
+        Alpaca:    ALPACA_API_KEY, ALPACA_SECRET_KEY
+        Robinhood: RH_USERNAME, RH_PASSWORD (RH_MFA_CODE if 2FA enabled)
         MAX_CONTRACTS, MAX_COLLATERAL_PCT, LIVE_TRADING
 """
-import hmac
 import os
 import time
 from typing import Literal
@@ -25,7 +27,6 @@ import ai
 import broker
 import scanner
 
-APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "1"))
 MAX_COLLATERAL_PCT = float(os.getenv("MAX_COLLATERAL_PCT", "0.25"))
 LIVE_ALLOWED = os.getenv("LIVE_TRADING", "").lower() == "true"
@@ -44,11 +45,7 @@ _recent = {}
 
 
 def auth(authorization: str = Header(default="")):
-    if not APP_PASSWORD:
-        raise HTTPException(503, "APP_PASSWORD is not set on the server.")
-    token = authorization.removeprefix("Bearer ").strip()
-    if not hmac.compare_digest(token.encode(), APP_PASSWORD.encode()):
-        raise HTTPException(401, "Wrong password.")
+    pass  # password check removed
 
 
 @app.get("/health")
@@ -69,7 +66,7 @@ def config():
 
 class ScanRequest(BaseModel):
     tickers: list[str] = Field(min_length=1, max_length=12)
-    delta: float = Field(0.20, ge=0.05, le=0.40)
+    delta: float = Field(0.15, ge=0.05, le=0.40)
     min_dte: int = Field(4, ge=0, le=60)
     max_dte: int = Field(10, ge=1, le=60)
     rate: float = Field(0.04, ge=0, le=0.15)
@@ -133,9 +130,9 @@ def order(req: OrderRequest):
         tc = broker.client(paper=(req.account == "paper"))
         bp = broker.buying_power(tc)
     except KeyError:
-        raise HTTPException(503, "Alpaca keys are not set on the server.")
+        raise HTTPException(503, "Broker API keys are not set on the server.")
     except Exception as e:
-        raise HTTPException(502, f"Couldn't reach Alpaca: {e}")
+        raise HTTPException(502, f"Couldn't reach broker: {e}")
     if collateral > bp * MAX_COLLATERAL_PCT:
         raise HTTPException(
             400,
