@@ -385,6 +385,12 @@ th, td { padding: 10px 8px; text-align: right; border-bottom: 1px solid var(--ru
 th { font-weight: 500; color: var(--muted); }
 th:first-child, td:first-child { text-align: left; }
 td svg { vertical-align: middle; }
+a.trade {
+  display: inline-block; font-weight: 600; font-size: .85rem; text-decoration: none;
+  padding: 5px 10px; border-radius: 6px; border: 1px solid var(--ink); color: var(--ink);
+}
+a.trade:hover { background: var(--ink); color: var(--bg); }
+a.trade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* panels */
 .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px; }
@@ -444,7 +450,7 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
       <table>
         <thead><tr>
           <th>Ticker</th><th>Price</th><th>Strike</th><th>Expires</th><th>Delta</th><th>Bid</th>
-          <th>IV</th><th>Below price</th><th>Annualized</th><th>1 month</th>
+          <th>IV</th><th>Below price</th><th>Annualized</th><th>1 month</th><th>Trade</th>
         </tr></thead>
         <tbody id="tbody"></tbody>
       </table>
@@ -612,6 +618,8 @@ function renderResults() {
       <td>${fmtDate(r.expiry)} <span class="muted">(${r.dte}d)</span></td><td>${r.delta.toFixed(2)}</td>
       <td>${usd(r.bid)}</td><td>${pct(r.iv, 0)}</td><td>${pct(r.otm, 1)}</td><td>${pct(r.annualized, 0)}</td>
       <td>${sparkline(r.trend)} <span class="muted">${(r.change_1m >= 0 ? "+" : "") + pct(r.change_1m, 1)}</span></td>
+      <td><a class="trade" href="https://robinhood.com/options/chains/${encodeURIComponent(r.ticker)}" target="_blank" rel="noopener noreferrer"
+        aria-label="Open ${r.ticker} options chain in Robinhood">Open in Robinhood ↗</a></td>
     </tr>`).join("");
 
   const sel = $("#o-ticker");
