@@ -5,6 +5,7 @@ Vercel: set Application Preset to "Flask". Add these in
 Settings → Environment Variables, then redeploy:
   APP_PASSWORD                      (required to place orders; scanning is open)
   GEMINI_API_KEY and/or ANTHROPIC_API_KEY
+  OMNIROUTE_BASE_URL, OMNIROUTE_API_KEY, OMNIROUTE_MODEL (optional gateway)
   ALPACA_API_KEY, ALPACA_SECRET_KEY (paper keys to start)
   MAX_CONTRACTS=1, MAX_COLLATERAL_PCT=0.25, LIVE_TRADING=false
 
@@ -156,12 +157,34 @@ def ask_claude(prompt, model):
     return "".join(b.text for b in msg.content if b.type == "text")
 
 
+def ask_omniroute(prompt, model):
+    """OmniRoute speaks the OpenAI chat completions API."""
+    import requests
+    if not model:
+        raise ValueError("set OMNIROUTE_MODEL in Vercel or type a model name")
+    base = os.environ["OMNIROUTE_BASE_URL"].rstrip("/")
+    if not base.endswith("/v1"):
+        base += "/v1"
+    headers = {}
+    if os.getenv("OMNIROUTE_API_KEY"):
+        headers["Authorization"] = f"Bearer {os.environ['OMNIROUTE_API_KEY']}"
+    resp = requests.post(f"{base}/chat/completions", headers=headers, timeout=60, json={
+        "model": model, "max_tokens": 1000,
+        "messages": [{"role": "system", "content": AI_SYSTEM}, {"role": "user", "content": prompt}],
+    })
+    if not resp.ok:
+        raise ValueError(f"OmniRoute returned {resp.status_code}: {resp.text[:200]}")
+    return resp.json()["choices"][0]["message"]["content"] or ""
+
+
 def providers():
     p = {}
     if os.getenv("GEMINI_API_KEY"):
         p["Gemini"] = (ask_gemini, "gemini-3.8-flash")
     if os.getenv("ANTHROPIC_API_KEY"):
         p["Claude"] = (ask_claude, "claude-haiku-4-5")
+    if os.getenv("OMNIROUTE_BASE_URL"):
+        p["OmniRoute"] = (ask_omniroute, os.getenv("OMNIROUTE_MODEL", ""))
     return p
 
 
@@ -564,7 +587,7 @@ function showApp() {
     $("#model").value = sel.selectedOptions[0].dataset.model;
   } else {
     $("#analyze-btn").disabled = true;
-    msg($("#ai-out"), "No AI key is set. Add GEMINI_API_KEY or ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables.", "info");
+    msg($("#ai-out"), "No AI key is set. Add GEMINI_API_KEY, ANTHROPIC_API_KEY or OMNIROUTE_BASE_URL in Vercel → Settings → Environment Variables.", "info");
   }
   $("#o-qty").max = cfg.max_contracts;
   $("#live-opt").classList.toggle("hidden", !cfg.live_allowed);
