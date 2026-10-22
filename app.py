@@ -25,6 +25,27 @@ from flask import Flask, Response, jsonify, request
 
 app = Flask(__name__)
 
+
+# Allow the static Vercel frontend to call this Render API.
+ALLOWED_ORIGINS = {
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "ALLOWED_ORIGINS", "https://frontend-option-trading-nu.vercel.app"
+    ).split(",")
+    if origin.strip()
+}
+
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get("Origin", "").rstrip("/")
+    if origin in ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    return response
+
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "1"))
 MAX_COLLATERAL_PCT = float(os.getenv("MAX_COLLATERAL_PCT", "0.25"))
