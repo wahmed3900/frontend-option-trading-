@@ -145,7 +145,7 @@ class OrderRequest(BaseModel):
 
 
 @app.post("/order")
-def order(req: OrderRequest, _auth: None = Depends(require_order_password)):
+def order(req: OrderRequest, _auth=Depends(require_order_password)):
     if req.account == "live" and not LIVE_ALLOWED:
         raise HTTPException(403, "Live trading is turned off on the server.")
     if req.qty > MAX_CONTRACTS:
