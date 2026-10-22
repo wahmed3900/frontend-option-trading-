@@ -1,8 +1,9 @@
 """
-Weekly put scanner — the whole app in one file (page + API), Flask on Vercel.
+Weekly put scanner API, served by Flask on Render for the static Vercel frontend.
 
-Vercel: set Application Preset to "Flask". Add these in
-Settings → Environment Variables, then redeploy:
+Render start command: python app.py
+Set these in Render environment variables:
+  ALLOWED_ORIGINS=https://frontend-option-trading-nu.vercel.app
   APP_PASSWORD                      (required to place orders; scanning is open)
   GEMINI_API_KEY and/or ANTHROPIC_API_KEY
   OMNIROUTE_BASE_URL, OMNIROUTE_API_KEY, OMNIROUTE_MODEL (optional gateway)
