@@ -361,5 +361,15 @@ $("#order-btn").addEventListener("click", async () => {
 
 init();
 </script>
-</body>
+<script>
+  // Keep Render backend alive — ping /health every 10 minutes
+  (function () {
+      var url = (window.API_URL || 'https://option-trading-dc1i.onrender.com').replace(/\/$/, '');
+      function ping() { fetch(url + '/health').catch(function () {}); }
+      ping();
+      setInterval(ping, 600000);
+  })();
+</script>
+  
+</script></body>
 </html>
