@@ -9,3 +9,5 @@ google-genai
 alpaca-py>=0.30
 pandas
 robin_stocks
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
