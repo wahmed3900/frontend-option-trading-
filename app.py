@@ -611,8 +611,16 @@ $("#scan-form").addEventListener("submit", async (ev) => {
       }),
     });
     results = data.results; scannedAt = Date.now();
+    if (!results.length) {
+      $("#results").classList.add("hidden");
+      const details = data.errors.length
+        ? ` Reasons: ${data.errors.join(" · ")}`
+        : "";
+      msg($("#scan-msg"),
+          `No results. Check the tickers or widen the days-out range.${details}`);
+      return;
+    }
     if (data.errors.length) msg($("#scan-msg"), data.errors.join(" · "), "info");
-    if (!results.length) { $("#results").classList.add("hidden"); msg($("#scan-msg"), "No results. Check the tickers or widen the days-out range."); return; }
     renderResults();
   } catch (e) {
     msg($("#scan-msg"), e.message);
