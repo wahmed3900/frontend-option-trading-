@@ -187,7 +187,8 @@ function msg(el, text, kind = "err") {
 }
 
 async function api(path, opts = {}, password = "") {
-  const headers = { "Content-Type": "application/json" };
+  const headers = {};
+  if (opts.body != null) headers["Content-Type"] = "application/json";
   if (password) headers.Authorization = "Bearer " + password;
   const res = await fetch(API + path, { ...opts, headers });
   let body = null;
