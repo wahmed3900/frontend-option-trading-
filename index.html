@@ -151,6 +151,7 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
           </div>
         </div>
         <div class="ticket-summary" id="o-summary"></div>
+        <div><label for="o-pw">Order password</label><input id="o-pw" type="password" autocomplete="current-password"></div>
         <label class="check"><input type="checkbox" id="o-confirm"> I've checked this against my broker and want to place it.</label>
         <button id="order-btn" type="button" disabled>Place order</button>
         <div id="order-msg"></div>
@@ -185,11 +186,10 @@ function msg(el, text, kind = "err") {
   el.appendChild(d);
 }
 
-async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " },
-  });
+async function api(path, opts = {}, password = "") {
+  const headers = { "Content-Type": "application/json" };
+  if (password) headers.Authorization = "Bearer " + password;
+  const res = await fetch(API + path, { ...opts, headers });
   let body = null;
   try { body = await res.json(); } catch (e) {}
   if (!res.ok) {
@@ -335,12 +335,12 @@ function updateTicket() {
   $("#o-summary").textContent =
     `Sell to open ${qty} × ${r.contract} (${r.ticker} ${usd(r.strike)} put, expires ${fmtDate(r.expiry)}) at ${usd(limit)} limit. ` +
     `Collects about ${usd(limit * 100 * qty, 0)} and ties up ${usd(r.strike * 100 * qty, 0)} in ${account()} account collateral.`;
-  $("#order-btn").disabled = stale || !$("#o-confirm").checked || limit <= 0;
+  $("#order-btn").disabled = stale || !$("#o-confirm").checked || limit <= 0 || !$("#o-pw").value;
   if (stale) msg($("#order-msg"), "Quotes are over 5 minutes old. Scan again before placing an order.", "info");
 }
 
 ["#o-ticker"].forEach((s) => $(s).addEventListener("change", () => selectTicket($("#o-ticker").value)));
-["#o-qty", "#o-limit", "#o-confirm"].forEach((s) => $(s).addEventListener("input", updateTicket));
+["#o-qty", "#o-limit", "#o-pw", "#o-confirm"].forEach((s) => $(s).addEventListener("input", updateTicket));
 document.querySelectorAll('input[name="acct"]').forEach((el) => el.addEventListener("change", () => { $("#o-confirm").checked = false; updateTicket(); }));
 setInterval(() => { if (results.length) updateTicket(); }, 15000);
 
@@ -352,7 +352,7 @@ $("#order-btn").addEventListener("click", async () => {
     const o = await api("/order", {
       method: "POST",
       body: JSON.stringify({ contract: r.contract, qty, limit: parseFloat($("#o-limit").value), account: account() }),
-    });
+    }, $("#o-pw").value);
     msg($("#order-msg"), `Order placed in ${o.account}: ${o.id} (${o.status})`, "ok");
     $("#o-confirm").checked = false;
   } catch (e) { msg($("#order-msg"), e.message); }
