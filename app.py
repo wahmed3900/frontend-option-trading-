@@ -1,9 +1,8 @@
 """
-Weekly put scanner API, served by Flask on Render for the static Vercel frontend.
+Weekly put scanner — the whole app in one file (page + API), Flask on Vercel.
 
-Render start command: python app.py
-Set these in Render environment variables:
-  ALLOWED_ORIGINS=https://frontend-option-trading-nu.vercel.app
+Vercel: set Application Preset to "Flask". Add these in
+Settings → Environment Variables, then redeploy:
   APP_PASSWORD                      (required to place orders; scanning is open)
   GEMINI_API_KEY and/or ANTHROPIC_API_KEY
   OMNIROUTE_BASE_URL, OMNIROUTE_API_KEY, OMNIROUTE_MODEL (optional gateway)
@@ -25,27 +24,6 @@ from functools import wraps
 from flask import Flask, Response, jsonify, request
 
 app = Flask(__name__)
-
-
-# Allow the static Vercel frontend to call this Render API.
-ALLOWED_ORIGINS = {
-    origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "ALLOWED_ORIGINS", "https://frontend-option-trading-nu.vercel.app"
-    ).split(",")
-    if origin.strip()
-}
-
-
-@app.after_request
-def add_cors_headers(response):
-    origin = request.headers.get("Origin", "").rstrip("/")
-    if origin in ALLOWED_ORIGINS:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Vary"] = "Origin"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-    return response
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "1"))
