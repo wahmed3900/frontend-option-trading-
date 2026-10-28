@@ -9,3 +9,4 @@ google-genai
 alpaca-py>=0.30
 pandas
 robin_stocks
+twilio>=9.0
