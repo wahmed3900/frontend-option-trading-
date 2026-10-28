@@ -3,11 +3,16 @@ Weekly put scanner — the whole app in one file (page + API), Flask on Vercel.
 
 Vercel: set Application Preset to "Flask". Add these in
 Settings → Environment Variables, then redeploy:
-  APP_PASSWORD                      (required to place orders; scanning is open)
+  APP_PASSWORD                      (required for orders and sending notifications)
   GEMINI_API_KEY and/or ANTHROPIC_API_KEY
   OMNIROUTE_BASE_URL, OMNIROUTE_API_KEY, OMNIROUTE_MODEL (optional gateway)
   ALPACA_API_KEY, ALPACA_SECRET_KEY (paper keys to start)
   MAX_CONTRACTS=1, MAX_COLLATERAL_PCT=0.25, LIVE_TRADING=false
+  EMAIL_FROM, EMAIL_APP_PASSWORD, ALERT_EMAIL (optional email results)
+  TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, ALERT_PHONE (optional SMS)
+
+The per-process request limiter is a best-effort safeguard. Use a shared rate-limit
+store at the edge when deploying multiple serverless instances.
 
 On your Mac:  APP_PASSWORD=test python app.py  → http://localhost:5000
 """
@@ -16,20 +21,56 @@ import hmac
 import json
 import math
 import os
+from pathlib import Path
 import re
+import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from functools import wraps
 
 from flask import Flask, Response, jsonify, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
-MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "1"))
-MAX_COLLATERAL_PCT = float(os.getenv("MAX_COLLATERAL_PCT", "0.25"))
+try:
+    MAX_CONTRACTS = int(os.getenv("MAX_CONTRACTS", "1"))
+    MAX_COLLATERAL_PCT = float(os.getenv("MAX_COLLATERAL_PCT", "0.25"))
+except ValueError as exc:
+    raise RuntimeError("MAX_CONTRACTS and MAX_COLLATERAL_PCT must be valid numbers.") from exc
+if not 1 <= MAX_CONTRACTS <= 100:
+    raise RuntimeError("MAX_CONTRACTS must be between 1 and 100.")
+if not math.isfinite(MAX_COLLATERAL_PCT) or not 0 < MAX_COLLATERAL_PCT <= 1:
+    raise RuntimeError("MAX_COLLATERAL_PCT must be greater than 0 and at most 1.")
 LIVE_ALLOWED = os.getenv("LIVE_TRADING", "").lower() == "true"
 STALE_SECONDS = 300
+RATE_WINDOW_SECONDS = 60
+RATE_LIMITS = {"scan": 6, "analyze": 4, "news": 6, "message": 3, "order": 5}
+_rate_lock = threading.Lock()
+_rate_hits = {}
+_news_cache = {}
+
+
+def rate_limited(bucket):
+    """Best-effort per-process throttling; use a shared limiter for multi-instance hosting."""
+    now = time.time()
+    key = (bucket, request.remote_addr or "unknown")
+    with _rate_lock:
+        hits = [stamp for stamp in _rate_hits.get(key, []) if now - stamp < RATE_WINDOW_SECONDS]
+        # Bound the in-process limiter state on long-running hosts.
+        if len(_rate_hits) > 5000:
+            for old_key, old_hits in list(_rate_hits.items()):
+                if not old_hits or now - old_hits[-1] >= RATE_WINDOW_SECONDS:
+                    _rate_hits.pop(old_key, None)
+        if len(hits) >= RATE_LIMITS[bucket]:
+            _rate_hits[key] = hits
+            return True
+        hits.append(now)
+        _rate_hits[key] = hits
+    return False
 
 
 # ---------------- helpers ----------------
@@ -42,6 +83,8 @@ def require_password(fn):
     def wrapper(*args, **kwargs):
         if not APP_PASSWORD:
             return fail(503, "APP_PASSWORD is not set in Vercel.")
+        if rate_limited("order"):
+            return fail(429, "Too many protected requests. Wait a minute and try again.")
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         if not hmac.compare_digest(token.encode(), APP_PASSWORD.encode()):
             return fail(401, "Wrong password.")
@@ -122,7 +165,8 @@ def scan_ticker(ticker, target, min_dte, max_dte, rate=0.04):
         "iv": round(num(best["impliedVolatility"]), 4), "premium": round(bid * 100, 2),
         "collateral": round(strike * 100, 2), "yield": yld, "annualized": yld * 365 / max(dte, 1),
         "otm": 1 - strike / spot, "change_1m": spot / closes[0] - 1 if closes[0] else 0.0,
-        "trend": closes, "ticket": {"ts": ts, "sig": sign(contract, ts)},
+        "trend": closes, "quote_asof": str(hist.index[-1]),
+        "ticket": {"ts": ts, "sig": sign(contract, ts)},
     }
 
 
@@ -211,6 +255,23 @@ def health():
     return jsonify({"ok": True})
 
 
+@app.get("/config.js")
+def client_config():
+    # The Flask-served page uses same-origin API routes. A separate static host
+    # can keep its own config.js and point API_URL at the backend's /api prefix.
+    return Response('window.API_URL = "";', mimetype="application/javascript")
+
+
+@app.after_request
+def add_cors_headers(response):
+    origin = os.getenv("FRONTEND_ORIGIN", "*").strip()
+    response.headers["Access-Control-Allow-Origin"] = origin or "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Vary"] = "Origin"
+    return response
+
+
 @app.get("/api/config")
 def config():
     return jsonify({
@@ -224,13 +285,22 @@ def config():
 
 @app.post("/api/scan")
 def scan():
+    if rate_limited("scan"):
+        return fail(429, "Scan limit reached. Wait a minute and try again.")
     body = request.get_json(silent=True) or {}
-    tickers = [str(t).strip().upper() for t in body.get("tickers", []) if str(t).strip()][:12]
+    raw_tickers = body.get("tickers", [])
+    if not isinstance(raw_tickers, list):
+        return fail(400, "Tickers must be a list.")
+    tickers = list(dict.fromkeys(str(t).strip().upper() for t in raw_tickers if str(t).strip()))[:12]
+    if any(not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", ticker) for ticker in tickers):
+        return fail(400, "Use valid ticker symbols (letters, numbers, dots, or hyphens).")
     if not tickers:
         return fail(400, "Enter at least one ticker.")
     delta = min(max(num(body.get("delta"), 0.15), 0.05), 0.40)
     min_dte = int(min(max(num(body.get("min_dte"), 4), 0), 60))
     max_dte = int(min(max(num(body.get("max_dte"), 10), 1), 60))
+    if min_dte > max_dte:
+        return fail(400, "Minimum days out cannot exceed maximum days out.")
 
     results, errors = [], []
     for t in tickers:
@@ -246,18 +316,33 @@ def scan():
 
 @app.post("/api/analyze")
 def analyze():
+    if rate_limited("analyze"):
+        return fail(429, "AI review limit reached. Wait a minute and try again.")
     body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return fail(400, "Invalid request body.")
     p = providers()
     name, model = body.get("provider"), str(body.get("model") or "")[:100]
     if name not in p:
         return fail(400, "That AI provider has no key set in Vercel.")
+    submitted = body.get("rows") or []
+    if not isinstance(submitted, list):
+        return fail(400, "Candidates must be a list.")
     rows = [{k: v for k, v in r.items() if k not in ("contract", "trend", "ticket")}
-            for r in (body.get("rows") or [])[:12] if isinstance(r, dict)]
+            for r in submitted[:12] if isinstance(r, dict)]
+    if any(not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", str(r.get("ticker", ""))) for r in rows):
+        return fail(400, "Invalid ticker in candidates.")
     if not rows:
         return fail(400, "Scan first.")
     fn, default_model = p[name]
+    if model and model != default_model:
+        return fail(400, "Only the configured default model is allowed.")
     try:
         result = parse_json(fn("Candidates (yield = bid / strike):\n" + json.dumps(rows, indent=2), model or default_model))
+        if not isinstance(result, dict):
+            raise ValueError("AI response must be a JSON object.")
+        if not isinstance(result.get("risks", []), list) or not isinstance(result.get("per_ticker", {}), dict):
+            raise ValueError("AI response has an invalid shape.")
     except Exception as e:
         return fail(502, f"AI request failed: {e}")
     if result.get("pick") not in {r["ticker"] for r in rows}:
@@ -269,11 +354,18 @@ def analyze():
 @require_password
 def order():
     body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return fail(400, "Invalid request body.")
     contract = str(body.get("contract", ""))
-    qty = int(num(body.get("qty"), 0))
+    raw_qty = num(body.get("qty"), 0)
+    if not raw_qty.is_integer():
+        return fail(400, "Contracts must be a whole number.")
+    qty = int(raw_qty)
     limit = num(body.get("limit"), 0)
     account = body.get("account", "paper")
     ticket = body.get("ticket") or {}
+    if not isinstance(ticket, dict):
+        return fail(400, "Invalid scan ticket. Scan again.")
 
     if account not in ("paper", "live"):
         return fail(400, "Unknown account.")
@@ -288,8 +380,11 @@ def order():
         str(ticket.get("sig", "")), sign(contract, ts)
     ):
         return fail(400, "Contract isn't from a scan. Scan again.")
-    if time.time() - ts > STALE_SECONDS:
+    age = time.time() - ts
+    if age < 0 or age > STALE_SECONDS:
         return fail(409, "Quotes are over 5 minutes old. Scan again.")
+    if account == "live" and body.get("manual_quote_confirmed") is not True:
+        return fail(400, "Confirm that you checked the current quote with your broker.")
 
     strike = int(contract[-8:]) / 1000  # OCC symbol ends with strike × 1000
     collateral = strike * 100 * qty
@@ -307,20 +402,186 @@ def order():
     try:
         from alpaca.trading.enums import OrderSide, PositionIntent, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest
+        client_order_id = hmac.new(
+            APP_PASSWORD.encode(),
+            f"{contract}|{ts}|{account}|{qty}|{round_price(limit)}".encode(),
+            hashlib.sha256,
+        ).hexdigest()[:48]
+        existing = None
+        try:
+            existing = tc.get_order_by_client_id(client_order_id)
+        except Exception:
+            existing = None
+        if existing:
+            return jsonify({"id": str(existing.id), "status": str(existing.status), "account": account, "duplicate": True})
         o = tc.submit_order(LimitOrderRequest(
             symbol=contract, qty=qty, side=OrderSide.SELL,
             position_intent=PositionIntent.SELL_TO_OPEN,
             time_in_force=TimeInForce.DAY, limit_price=round_price(limit),
+            client_order_id=client_order_id,
         ))
     except Exception as e:
         return fail(502, f"Order rejected: {e}")
     return jsonify({"id": str(o.id), "status": str(o.status), "account": account})
 
 
+# ---------------- market news and notifications ----------------
+@app.get("/api/news")
+def news():
+    if rate_limited("news"):
+        return fail(429, "News refresh limit reached. Wait a minute and try again.")
+    import yfinance as yf
+    raw = request.args.get("tickers", "SPY,QQQ,NVDA")
+    tickers = list(dict.fromkeys(t.strip().upper() for t in raw.split(",") if t.strip()))[:10]
+    if any(not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", ticker) for ticker in tickers):
+        return fail(400, "Invalid ticker symbol.")
+    cache_key = tuple(tickers)
+    cached = _news_cache.get(cache_key)
+    if cached and time.time() - cached[0] < 300:
+        return jsonify(cached[1])
+    seen, items, errors = set(), [], []
+    for ticker in tickers:
+        try:
+            for item in (yf.Ticker(ticker).news or [])[:5]:
+                content = item.get("content") or {}
+                uid = item.get("id") or item.get("uuid") or item.get("link") or content.get("id")
+                title = content.get("title") or item.get("title") or ""
+                link = ((content.get("canonicalUrl") or {}).get("url") or item.get("link") or item.get("url") or "")
+                parsed = __import__("urllib.parse", fromlist=["urlparse"]).urlparse(link)
+                if not uid or uid in seen or not title or parsed.scheme != "https" or not parsed.hostname:
+                    continue
+                seen.add(uid)
+                publisher = (content.get("provider") or {}).get("displayName") or item.get("publisher") or ""
+                published = content.get("pubDate") or item.get("providerPublishTime") or 0
+                if isinstance(published, str):
+                    try:
+                        published = int(datetime.fromisoformat(published.replace("Z", "+00:00")).timestamp())
+                    except ValueError:
+                        published = 0
+                items.append({"title": str(title)[:500], "url": link, "source": str(publisher)[:120],
+                              "published": int(published or 0), "ticker": ticker})
+        except Exception:
+            errors.append(ticker)
+    items.sort(key=lambda item: item["published"], reverse=True)
+    response = {"items": items[:25], "errors": errors}
+    _news_cache[cache_key] = (time.time(), response)
+    if len(_news_cache) > 256:
+        oldest = min(_news_cache, key=lambda key: _news_cache[key][0])
+        _news_cache.pop(oldest, None)
+    return jsonify(response)
+
+
+def _authorized_message():
+    if not APP_PASSWORD:
+        return fail(503, "APP_PASSWORD is not set.")
+    if rate_limited("message"):
+        return fail(429, "Message limit reached. Wait a minute and try again.")
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not hmac.compare_digest(token.encode(), APP_PASSWORD.encode()):
+        return fail(401, "Wrong password.")
+    return None
+
+
+def _validated_results(body):
+    rows = body.get("results")
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 12:
+        raise ValueError("Provide between 1 and 12 scan results.")
+    clean = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Invalid scan result.")
+        ticker = str(row.get("ticker", "")).upper()
+        if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", ticker):
+            raise ValueError("Invalid ticker in scan result.")
+        values = {}
+        for field in ("strike", "annualized", "yield", "otm", "bid", "premium", "collateral", "delta", "iv"):
+            try:
+                value = float(row[field])
+                if not math.isfinite(value):
+                    raise ValueError
+                values[field] = value
+            except (KeyError, TypeError, ValueError):
+                raise ValueError(f"Invalid {field} for {ticker}.")
+        expiry = str(row.get("expiry", ""))
+        try:
+            datetime.strptime(expiry, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"Invalid expiry for {ticker}.")
+        clean.append({"ticker": ticker, "expiry": expiry, "dte": int(num(row.get("dte"))), **values})
+    return clean
+
+
+@app.post("/api/email-results")
+def email_results():
+    auth_error = _authorized_message()
+    if auth_error:
+        return auth_error
+    body = request.get_json(silent=True) or {}
+    try:
+        rows = _validated_results(body)
+    except ValueError as exc:
+        return fail(400, str(exc))
+    recipients = [x.strip() for x in os.getenv("ALERT_EMAIL", "").split(",") if x.strip()]
+    if not recipients or len(recipients) > 5:
+        return fail(503, "Configure up to five ALERT_EMAIL recipients.")
+    from email.message import EmailMessage
+    import smtplib
+    sender, password = os.getenv("EMAIL_FROM", ""), os.getenv("EMAIL_APP_PASSWORD", "")
+    if not sender or not password:
+        return fail(503, "EMAIL_FROM and EMAIL_APP_PASSWORD must be configured.")
+    html_rows = "".join("<tr>" + "".join(f"<td>{__import__('html').escape(str(value))}</td>" for value in
+        (r['ticker'], r['expiry'], f"${r['strike']:.2f}", f"${r['bid']:.2f}", f"{r['annualized']*100:.1f}%")) + "</tr>" for r in rows)
+    message = EmailMessage()
+    message["Subject"] = f"Put Scanner Results — {date.today().isoformat()}"
+    message["From"] = sender
+    message["To"] = ", ".join(recipients)
+    message.set_content("Put scanner results are attached in the HTML version.")
+    message.add_alternative(f"<h2>Weekly Put Scanner</h2><table><thead><tr><th>Ticker</th><th>Expiry</th><th>Strike</th><th>Bid</th><th>Annualized yield</th></tr></thead><tbody>{html_rows}</tbody></table><p>Not financial advice.</p>", subtype="html")
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
+            smtp.login(sender, password)
+            smtp.send_message(message, to_addrs=recipients)
+    except Exception:
+        app.logger.exception("Email delivery failed")
+        return fail(502, "Email delivery failed. Check server logs.")
+    return jsonify({"sent": len(recipients)})
+
+
+@app.post("/api/text-results")
+def text_results():
+    auth_error = _authorized_message()
+    if auth_error:
+        return auth_error
+    body = request.get_json(silent=True) or {}
+    try:
+        rows = _validated_results(body)
+    except ValueError as exc:
+        return fail(400, str(exc))
+    recipients = [x.strip() for x in os.getenv("ALERT_PHONE", "").split(",") if x.strip()]
+    if not recipients or len(recipients) > 5 or any(not re.fullmatch(r"\+[1-9]\d{7,14}", x) for x in recipients):
+        return fail(503, "Configure up to five valid ALERT_PHONE recipients in E.164 format.")
+    sid, token, sender = (os.getenv(k, "") for k in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM"))
+    if not sid or not token or not sender:
+        return fail(503, "Twilio credentials and TWILIO_FROM must be configured.")
+    try:
+        from twilio.rest import Client
+        client = Client(sid, token)
+        lines = ["Put Scanner — Not financial advice"]
+        for row in rows[:4]:
+            lines.append(f"{row['ticker']} ${row['strike']:.2f} put {row['expiry']} bid ${row['bid']:.2f}")
+        for recipient in recipients:
+            client.messages.create(body="\n".join(lines), from_=sender, to=recipient)
+    except Exception:
+        app.logger.exception("SMS delivery failed")
+        return fail(502, "SMS delivery failed. Check server logs.")
+    return jsonify({"sent": len(recipients)})
+
+
 # ---------------- page ----------------
 @app.get("/")
 def home():
-    return Response(PAGE_HTML, mimetype="text/html")
+    page = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
+    return Response(page, mimetype="text/html")
 
 
 PAGE_HTML = r"""<!doctype html>
@@ -444,6 +705,20 @@ a.trade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .manual dt { color: var(--muted); }
 .manual dd { margin: 0; font-weight: 600; }
 
+
+.news-section { margin-top: 40px; }
+.news-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.news-header h2 { margin:0; }
+.news-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+.news-card { display:block; background:var(--surface); border:1px solid var(--rule); border-radius:9px; padding:14px; color:inherit; text-decoration:none; }
+.news-card:hover { border-color:var(--accent); }
+.news-meta,.news-source { color:var(--muted); font-size:.82rem; }
+.news-badge { color:var(--accent); font-weight:600; margin-right:8px; }
+.news-title { font-weight:600; margin:8px 0; }
+.news-empty { color:var(--muted); }
+.message-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:20px; }
+#message-status { color:var(--muted); font-size:.9rem; }
+
 footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70ch; }
 </style>
 </head>
@@ -522,6 +797,16 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
     </div>
   </section>
 
+
+  <section class="news-section" aria-labelledby="news-heading">
+    <div class="news-header"><h2 id="news-heading">Market News</h2><button id="news-btn" class="secondary" type="button">Load News</button></div>
+    <div id="news-out" aria-live="polite"></div>
+  </section>
+  <section class="message-bar hidden" id="message-bar" aria-label="Send scan results">
+    <button id="email-btn" class="secondary" type="button">Email my configured recipients</button>
+    <button id="text-btn" class="secondary" type="button">Text my configured recipients</button>
+    <span id="message-status" role="status"></span>
+  </section>
   <footer>
     Data from Yahoo Finance, delayed about 15 minutes. Delta is calculated from Yahoo's implied volatility.
     The AI only reviews; strike, size, and price come from the scan and your inputs.
@@ -632,7 +917,7 @@ function renderResults() {
   $("#verdict-big").textContent = `${top.ticker} pays ${pct(top.yield)} this week`;
   $("#verdict-sub").textContent =
     `Sell the ${usd(top.strike, top.strike % 1 ? 2 : 0)} put expiring ${fmtDate(top.expiry)} for about ${usd(top.premium, 0)} per contract ` +
-    `on ${usd(top.collateral, 0)} collateral. That's ${pct(top.otm, 1)} below today's price, ${pct(top.annualized, 0)} annualized.`;
+    `on ${usd(top.collateral, 0)} collateral. That is ${pct(top.otm, 1)} below the latest daily close (${top.quote_asof || "date unavailable"}), ${pct(top.annualized, 0)} annualized. Yahoo option quotes may be delayed; check the current broker quote before trading.`;
 
   const max = Math.max(...results.map((r) => r.yield));
   $("#bars").innerHTML = results.map((r, i) => `
@@ -659,6 +944,8 @@ function renderResults() {
   msg($("#order-msg"), "");
   selectTicket(top.ticker);
   $("#results").classList.remove("hidden");
+  $("#message-bar").classList.remove("hidden");
+  loadNews(results.map(r => r.ticker).join(","));
 }
 
 // ---------- AI ----------
@@ -767,13 +1054,70 @@ $("#order-btn").addEventListener("click", async () => {
   try {
     const o = await api("/order", {
       method: "POST",
-      body: JSON.stringify({ contract: r.contract, qty, limit: parseFloat($("#o-limit").value), account: account(), ticket: r.ticket }),
+      body: JSON.stringify({ contract: r.contract, qty, limit: parseFloat($("#o-limit").value), account: account(), ticket: r.ticket, manual_quote_confirmed: $("#o-confirm").checked }),
     }, $("#o-pw").value);
     msg($("#order-msg"), `Order placed in ${o.account}: ${o.id} (${o.status})`, "ok");
     $("#o-confirm").checked = false;
   } catch (e) { msg($("#order-msg"), e.status === 401 ? "Wrong order password." : e.message); }
   finally { btn.textContent = "Place order"; updateTicket(); }
 });
+
+
+// ---------- market news ----------
+function timeAgo(ts) {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - Number(ts || 0)));
+  if (!ts) return "Date unavailable";
+  if (seconds < 60) return "Just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+async function loadNews(tickers) {
+  const btn = $("#news-btn"), out = $("#news-out");
+  btn.disabled = true; btn.textContent = "Loading…"; out.replaceChildren();
+  try {
+    const symbols = tickers || results.map(r => r.ticker).join(",") || "SPY,QQQ,NVDA";
+    const data = await api("/news?tickers=" + encodeURIComponent(symbols));
+    if (!data.items.length) {
+      const p = document.createElement("p"); p.className = "news-empty";
+      p.textContent = data.errors && data.errors.length ? "News provider unavailable for some symbols." : "No headlines found.";
+      out.append(p); return;
+    }
+    const grid = document.createElement("div"); grid.className = "news-grid";
+    for (const item of data.items) {
+      let url;
+      try { url = new URL(item.url); } catch (_) { continue; }
+      if (url.protocol !== "https:") continue;
+      const card = document.createElement("a"); card.className = "news-card";
+      card.href = url.href; card.target = "_blank"; card.rel = "noopener noreferrer";
+      const meta = document.createElement("div"); meta.className = "news-meta";
+      const badge = document.createElement("span"); badge.className = "news-badge"; badge.textContent = item.ticker;
+      const when = document.createElement("span"); when.textContent = timeAgo(item.published);
+      meta.append(badge, when);
+      const title = document.createElement("div"); title.className = "news-title"; title.textContent = item.title;
+      const source = document.createElement("div"); source.className = "news-source"; source.textContent = item.source || "News source";
+      card.append(meta, title, source); grid.append(card);
+    }
+    out.append(grid);
+  } catch (error) {
+    const p = document.createElement("p"); p.className = "news-empty"; p.textContent = "Could not load news: " + error.message; out.append(p);
+  } finally { btn.disabled = false; btn.textContent = "Refresh"; }
+}
+$("#news-btn").addEventListener("click", () => loadNews());
+
+async function sendScanResults(kind) {
+  const btn = $(kind === "email" ? "#email-btn" : "#text-btn"), status = $("#message-status");
+  btn.disabled = true; status.textContent = "Sending…";
+  try {
+    const response = await api(kind === "email" ? "/email-results" : "/text-results", {
+      method: "POST", body: JSON.stringify({ results })
+    }, $("#o-pw").value);
+    status.textContent = `Sent to ${response.sent} configured recipient(s).`;
+  } catch (error) { status.textContent = error.message; }
+  finally { btn.disabled = false; }
+}
+$("#email-btn").addEventListener("click", () => sendScanResults("email"));
+$("#text-btn").addEventListener("click", () => sendScanResults("text"));
 
 // ---------- start ----------
 const slow = setTimeout(() => msg($("#scan-msg"), "Starting up…", "info"), 2500);
