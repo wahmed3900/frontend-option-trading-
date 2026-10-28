@@ -1,0 +1,141 @@
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -9,3 +9,4 @@
+ alpaca-py>=0.30
+ pandas
+ robin_stocks
++twilio>=9.0
+
+--- a/app.py
++++ b/app.py
+@@ -1,6 +1,7 @@
+ # After existing imports — add near the top, no change needed at import time
+ # (twilio is imported lazily inside the route)
+
++# ── Twilio helper ────────────────────────────────────────────────────────────
++
++def _twilio_client():
++    sid   = os.getenv("TWILIO_ACCOUNT_SID")
++    token = os.getenv("TWILIO_AUTH_TOKEN")
++    if not sid or not token:
++        raise RuntimeError("TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must be set in Vercel.")
++    from twilio.rest import Client
++    return Client(sid, token)
++
++def _sms_body(pick: dict) -> str:
++    from datetime import datetime
++    try:
++        exp_fmt = datetime.strptime(pick["expiry"], "%Y-%m-%d").strftime("%b %-d")
++    except Exception:
++        exp_fmt = pick.get("expiry", "")
++    ann = pick.get("annualized", 0) * 100
++    yld = pick.get("yield", 0) * 100
++    otm = pick.get("otm", 0) * 100
++    return (
++        f"📊 Put Scanner — Top Pick\n\n"
++        f"Ticker:     {pick['ticker']}\n"
++        f"Strike:     ${pick['strike']:,.2f} put\n"
++        f"Expires:    {exp_fmt} ({pick['dte']}d)\n"
++        f"Bid:        ${pick['bid']:.2f}  (${pick['premium']:.0f}/contract)\n"
++        f"Collateral: ${pick['collateral']:,.0f}\n"
++        f"Week yield: {yld:.1f}%  ({ann:.0f}% ann.)\n"
++        f"OTM:        {otm:.1f}%  |  Delta: {pick['delta']:.2f}\n"
++        f"IV:         {pick['iv']*100:.0f}%\n\n"
++        f"Not financial advice."
++    )
++
++# ── /api/sms route — add alongside /api/analyze ──────────────────────────────
++
++@app.post("/api/sms")
++def send_sms():
++    body  = request.get_json(silent=True) or {}
++    to    = str(body.get("to", "")).strip()
++    pick  = body.get("pick")
++    from_ = os.getenv("TWILIO_FROM", "")
++    if not re.fullmatch(r"\+1\d{10}", to):
++        return fail(400, "Enter a US number in +1XXXXXXXXXX format.")
++    if not pick or not isinstance(pick, dict) or "ticker" not in pick:
++        return fail(400, "No scan result provided. Run a scan first.")
++    if not from_:
++        return fail(503, "TWILIO_FROM is not set in Vercel.")
++    try:
++        client = _twilio_client()
++        m = client.messages.create(body=_sms_body(pick), from_=from_, to=to)
++    except RuntimeError as e:
++        return fail(503, str(e))
++    except Exception as e:
++        return fail(502, f"Twilio error: {e}")
++    return jsonify({"sid": m.sid, "status": str(m.status)})
+
+# ── CSS — add inside the <style> block in PAGE_HTML ─────────────────────────
+# Find the line:   footer { margin-top: 48px; ...
+# Add BEFORE it:
+
++.sms-row {
++    display: flex; gap: 10px; align-items: flex-end; margin-top: 20px;
++    padding-top: 20px; border-top: 1px solid var(--rule);
++}
++.sms-row .ph-wrap { flex: 1; }
++.sms-row label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
++.sms-row input {
++    font: inherit; color: var(--ink); background: var(--surface);
++    border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; width: 100%;
++}
++.sms-row button { white-space: nowrap; }
++#sms-msg { margin-top: 8px; }
+
+# ── HTML — add just before </section> (the closing tag of #results) ──────────
+
++<div class="sms-row" id="sms-row">
++  <div class="ph-wrap">
++    <label for="sms-phone">Text me the top pick (US number)</label>
++    <input id="sms-phone" type="tel" placeholder="+1 (916) 555-0100"
++           autocomplete="tel" inputmode="tel">
++  </div>
++  <button id="sms-btn" class="secondary" type="button" disabled>📱 Text me</button>
++</div>
++<div id="sms-msg"></div>
+
+# ── JavaScript — add just before </script> ───────────────────────────────────
+
++(function () {
++    const phoneEl = document.getElementById("sms-phone");
++    const smsBtn  = document.getElementById("sms-btn");
++    const smsMsg  = document.getElementById("sms-msg");
++    try {
++        const saved = localStorage.getItem("sms_phone");
++        if (saved) phoneEl.value = saved;
++    } catch (_) {}
++    function normPhone(raw) {
++        const digits = raw.replace(/\D/g, "");
++        if (digits.length === 10) return "+1" + digits;
++        if (digits.length === 11 && digits[0] === "1") return "+" + digits;
++        return null;
++    }
++    function enableSms() {
++        smsBtn.disabled = !results.length || !normPhone(phoneEl.value || "");
++    }
++    phoneEl.addEventListener("input", enableSms);
++    const observer = new MutationObserver(() => enableSms());
++    observer.observe(document.getElementById("results"), { attributes: true });
++    smsBtn.addEventListener("click", async () => {
++        const to = normPhone(phoneEl.value || "");
++        if (!to) { msg(smsMsg, "Enter a valid US number like +19165550100", "err"); return; }
++        if (!results.length) { msg(smsMsg, "Run a scan first.", "err"); return; }
++        try { localStorage.setItem("sms_phone", phoneEl.value); } catch (_) {}
++        smsBtn.disabled = true; smsBtn.textContent = "Sending…";
++        msg(smsMsg, "");
++        try {
++            await api("/sms", {
++                method: "POST",
++                body: JSON.stringify({ to, pick: results[0] }),
++            });
++            msg(smsMsg, "✓ Sent to " + phoneEl.value, "ok");
++        } catch (e) {
++            msg(smsMsg, e.message, "err");
++        } finally {
++            smsBtn.disabled = false; smsBtn.textContent = "📱 Text me";
++            enableSms();
++        }
++    });
++})();
