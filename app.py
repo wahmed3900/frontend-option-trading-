@@ -8,6 +8,7 @@ Settings → Environment Variables, then redeploy:
   OMNIROUTE_BASE_URL, OMNIROUTE_API_KEY, OMNIROUTE_MODEL (optional gateway)
   ALPACA_API_KEY, ALPACA_SECRET_KEY (paper keys to start)
   MAX_CONTRACTS=1, MAX_COLLATERAL_PCT=0.25, LIVE_TRADING=false
+  ALLOWED_ORIGINS=https://your-frontend.vercel.app
   EMAIL_FROM, EMAIL_APP_PASSWORD, ALERT_EMAIL (optional email results)
   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, ALERT_PHONE (optional SMS)
 
@@ -278,8 +279,16 @@ def client_config():
 
 @app.after_request
 def add_cors_headers(response):
-    origin = os.getenv("FRONTEND_ORIGIN", "*").strip()
-    response.headers["Access-Control-Allow-Origin"] = origin or "*"
+    # ALLOWED_ORIGINS is the deployment setting; retain FRONTEND_ORIGIN as a
+    # backward-compatible alias. A comma-separated list supports preview and
+    # production frontends without emitting an invalid multi-origin header.
+    configured = os.getenv("ALLOWED_ORIGINS", os.getenv("FRONTEND_ORIGIN", "*")).strip()
+    allowed_origins = {value.strip() for value in configured.split(",") if value.strip()}
+    request_origin = request.headers.get("Origin", "")
+    if "*" in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    elif request_origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = request_origin
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Vary"] = "Origin"
