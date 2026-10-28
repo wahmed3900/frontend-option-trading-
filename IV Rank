@@ -1,0 +1,940 @@
+From beb7ca50907a821ed812420dd4f57af7ef917755 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 27 Oct 2026 18:50:02 -0700
+Subject: [PATCH 1/3] Add market news section to scanner
+
+- New /api/news endpoint fetches headlines via yfinance for scanned tickers
+- News grid auto-loads after every scan, showing ticker badge + time ago + source
+- Manual "Load News" / "Refresh" button above the footer works before a scan
+- News CSS added to both app.py (PAGE_HTML) and standalone index.html
+- Handles new yfinance news schema (nested content.title / content.provider)
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Bo7dPcqow4LhD4FcWaD2hJ
+---
+ app.py     | 119 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ index.html |  80 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 199 insertions(+)
+
+diff --git a/app.py b/app.py
+index b2cd32f..9943119 100644
+--- a/app.py
++++ b/app.py
+@@ -317,6 +317,47 @@ def order():
+     return jsonify({"id": str(o.id), "status": str(o.status), "account": account})
+ 
+ 
++# ---------------- news ----------------
++@app.get("/api/news")
++def news():
++    import yfinance as yf
++    tickers_param = request.args.get("tickers", "SPY,QQQ,NVDA")
++    tickers = [t.strip().upper() for t in tickers_param.split(",") if t.strip()][:10]
++    seen, items = set(), []
++    for ticker in tickers:
++        try:
++            tk = yf.Ticker(ticker)
++            for n in (tk.news or [])[:5]:
++                uid = n.get("id") or n.get("uuid") or n.get("link", "")
++                if uid in seen:
++                    continue
++                seen.add(uid)
++                content = n.get("content", {}) or {}
++                title = content.get("title") or n.get("title", "")
++                url = (content.get("canonicalUrl", {}) or {}).get("url") or n.get("link") or n.get("url", "")
++                publisher = (content.get("provider", {}) or {}).get("displayName") or n.get("publisher", "")
++                pub_time = content.get("pubDate") or n.get("providerPublishTime", 0)
++                # normalize pub_time to unix int
++                if isinstance(pub_time, str):
++                    try:
++                        from datetime import timezone
++                        pub_time = int(datetime.fromisoformat(pub_time.replace("Z", "+00:00")).timestamp())
++                    except Exception:
++                        pub_time = 0
++                if title and url:
++                    items.append({
++                        "title": title,
++                        "url": url,
++                        "source": publisher,
++                        "published": int(pub_time) if pub_time else 0,
++                        "ticker": ticker,
++                    })
++        except Exception:
++            pass
++    items.sort(key=lambda x: x["published"], reverse=True)
++    return jsonify({"items": items[:25]})
++
++
+ # ---------------- page ----------------
+ @app.get("/")
+ def home():
+@@ -445,6 +486,27 @@ a.trade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+ .manual dd { margin: 0; font-weight: 600; }
+ 
+ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70ch; }
++
++/* news */
++.news-section { margin-top: 48px; }
++.news-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
++.news-header h2 { margin: 0; }
++.news-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
++.news-card {
++  background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
++  padding: 16px; display: flex; flex-direction: column; gap: 8px;
++  text-decoration: none; color: inherit; transition: border-color .15s;
++}
++.news-card:hover { border-color: var(--accent); }
++.news-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
++.news-meta { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--muted); }
++.news-badge {
++  font-size: .72rem; font-weight: 600; padding: 2px 7px; border-radius: 4px;
++  background: var(--accent-soft); color: var(--accent); white-space: nowrap;
++}
++.news-title { font-size: .95rem; font-weight: 600; line-height: 1.4; flex: 1; }
++.news-source { font-size: .82rem; color: var(--muted); }
++.news-empty { color: var(--muted); font-size: .95rem; padding: 12px 0; }
+ </style>
+ </head>
+ <body>
+@@ -522,6 +584,14 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
+     </div>
+   </section>
+ 
++  <section class="news-section">
++    <div class="news-header">
++      <h2>Market News</h2>
++      <button id="news-btn" class="secondary" type="button">Load News</button>
++    </div>
++    <div id="news-out"></div>
++  </section>
++
+   <footer>
+     Data from Yahoo Finance, delayed about 15 minutes. Delta is calculated from Yahoo's implied volatility.
+     The AI only reviews; strike, size, and price come from the scan and your inputs.
+@@ -659,6 +729,7 @@ function renderResults() {
+   msg($("#order-msg"), "");
+   selectTicket(top.ticker);
+   $("#results").classList.remove("hidden");
++  loadNews(results.map(r => r.ticker).join(","));
+ }
+ 
+ // ---------- AI ----------
+@@ -775,6 +846,54 @@ $("#order-btn").addEventListener("click", async () => {
+   finally { btn.textContent = "Place order"; updateTicket(); }
+ });
+ 
++// ---------- news ----------
++function timeAgo(ts) {
++  if (!ts) return "";
++  const diff = Math.floor((Date.now() / 1000) - ts);
++  if (diff < 60) return "just now";
++  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
++  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
++  return Math.floor(diff / 86400) + "d ago";
++}
++
++async function loadNews(tickerList) {
++  const btn = $("#news-btn"), out = $("#news-out");
++  btn.disabled = true; btn.textContent = "Loading…";
++  out.innerHTML = "";
++  try {
++    const tickers = tickerList || $("#tickers").value.split(",").map(t => t.trim()).filter(Boolean).join(",") || "SPY,QQQ,NVDA";
++    const data = await api("/news?tickers=" + encodeURIComponent(tickers));
++    if (!data.items || !data.items.length) {
++      out.innerHTML = '<p class="news-empty">No news found for these tickers.</p>';
++      return;
++    }
++    const grid = document.createElement("div");
++    grid.className = "news-grid";
++    data.items.forEach(item => {
++      const a = document.createElement("a");
++      a.className = "news-card";
++      a.href = item.url;
++      a.target = "_blank";
++      a.rel = "noopener noreferrer";
++      a.innerHTML = `
++        <div class="news-meta">
++          <span class="news-badge">${item.ticker}</span>
++          <span>${timeAgo(item.published)}</span>
++        </div>
++        <div class="news-title">${item.title}</div>
++        <div class="news-source">${item.source}</div>`;
++      grid.appendChild(a);
++    });
++    out.appendChild(grid);
++  } catch (e) {
++    msg(out, "Couldn't load news: " + e.message);
++  } finally {
++    btn.disabled = false; btn.textContent = "Refresh";
++  }
++}
++
++$("#news-btn").addEventListener("click", () => loadNews(null));
++
+ // ---------- start ----------
+ const slow = setTimeout(() => msg($("#scan-msg"), "Starting up…", "info"), 2500);
+ api("/config")
+diff --git a/index.html b/index.html
+index 2b7e72f..296bdeb 100644
+--- a/index.html
++++ b/index.html
+@@ -94,6 +94,27 @@ td svg { vertical-align: middle; }
+ .msg.ok { background: var(--accent-soft); color: var(--accent); }
+ .msg.info { background: var(--surface); border: 1px solid var(--rule); color: var(--muted); }
+ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70ch; }
++
++/* news */
++.news-section { margin-top: 48px; }
++.news-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
++.news-header h2 { margin: 0; }
++.news-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
++.news-card {
++  background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
++  padding: 16px; display: flex; flex-direction: column; gap: 8px;
++  text-decoration: none; color: inherit; transition: border-color .15s;
++}
++.news-card:hover { border-color: var(--accent); }
++.news-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
++.news-meta { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--muted); }
++.news-badge {
++  font-size: .72rem; font-weight: 600; padding: 2px 7px; border-radius: 4px;
++  background: var(--accent-soft); color: var(--accent); white-space: nowrap;
++}
++.news-title { font-size: .95rem; font-weight: 600; line-height: 1.4; flex: 1; }
++.news-source { font-size: .82rem; color: var(--muted); }
++.news-empty { color: var(--muted); font-size: .95rem; padding: 12px 0; }
+ </style>
+ </head>
+ <body>
+@@ -158,6 +179,14 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
+     </div>
+   </section>
+ 
++  <section class="news-section">
++    <div class="news-header">
++      <h2>Market News</h2>
++      <button id="news-btn" class="secondary" type="button">Load News</button>
++    </div>
++    <div id="news-out"></div>
++  </section>
++
+   <footer>
+     Data from Yahoo Finance, delayed about 15 minutes. Delta is calculated from Yahoo's implied volatility.
+     The AI only reviews; strike, size, and price come from the scan and your inputs.
+@@ -252,6 +281,7 @@ $("#scan-form").addEventListener("submit", async (ev) => {
+     if (data.errors.length) msg($("#scan-msg"), data.errors.join(" · "), "info");
+     if (!results.length) { $("#results").classList.add("hidden"); msg($("#scan-msg"), "No results. Check the tickers or widen the days-out range."); return; }
+     renderResults();
++    loadNews(data.results.map(r => r.ticker).join(","));
+   } catch (e) {
+     msg($("#scan-msg"), e.message);
+   } finally { btn.disabled = false; btn.textContent = "Scan"; }
+@@ -359,6 +389,56 @@ $("#order-btn").addEventListener("click", async () => {
+   finally { btn.textContent = "Place order"; updateTicket(); }
+ });
+ 
++// ---------- news ----------
++function timeAgo(ts) {
++  if (!ts) return "";
++  const diff = Math.floor((Date.now() / 1000) - ts);
++  if (diff < 60) return "just now";
++  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
++  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
++  return Math.floor(diff / 86400) + "d ago";
++}
++
++async function loadNews(tickerList) {
++  const btn = $("#news-btn"), out = $("#news-out");
++  btn.disabled = true; btn.textContent = "Loading…";
++  out.innerHTML = "";
++  const API_BASE = (window.API_URL || "").replace(/\/$/, "");
++  try {
++    const tickers = tickerList || $("#tickers").value.split(",").map(t => t.trim()).filter(Boolean).join(",") || "SPY,QQQ,NVDA";
++    const res = await fetch(API_BASE + "/news?tickers=" + encodeURIComponent(tickers));
++    const data = await res.json();
++    if (!data.items || !data.items.length) {
++      out.innerHTML = '<p class="news-empty">No news found for these tickers.</p>';
++      return;
++    }
++    const grid = document.createElement("div");
++    grid.className = "news-grid";
++    data.items.forEach(item => {
++      const a = document.createElement("a");
++      a.className = "news-card";
++      a.href = item.url;
++      a.target = "_blank";
++      a.rel = "noopener noreferrer";
++      a.innerHTML = `
++        <div class="news-meta">
++          <span class="news-badge">${item.ticker}</span>
++          <span>${timeAgo(item.published)}</span>
++        </div>
++        <div class="news-title">${item.title}</div>
++        <div class="news-source">${item.source}</div>`;
++      grid.appendChild(a);
++    });
++    out.appendChild(grid);
++  } catch (e) {
++    out.innerHTML = '<p class="news-empty">Couldn\'t load news.</p>';
++  } finally {
++    btn.disabled = false; btn.textContent = "Refresh";
++  }
++}
++
++$("#news-btn").addEventListener("click", () => loadNews(null));
++
+ init();
+ </script>
+ <script>
+-- 
+2.43.0
+
+
+From b55d5d7dcd5b8240ab381883883f57fe1f40c97f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 27 Oct 2026 18:50:02 -0700
+Subject: [PATCH 2/3] Add email and SMS text alerts for scan results
+
+- /api/email-results: sends formatted HTML email via Gmail SMTP
+  to ALERT_EMAIL + CLIENT_EMAILS + any ad-hoc addresses typed in UI
+- /api/text-results: sends concise SMS via Twilio to ALERT_PHONE
+  + CLIENT_PHONES + any ad-hoc numbers typed in UI
+- Email/Text Results bar appears in UI after a scan completes
+- AI review result (pick, confidence, summary) included in both email and SMS
+- New env vars: EMAIL_FROM, EMAIL_APP_PASSWORD, ALERT_EMAIL, CLIENT_EMAILS,
+  TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, ALERT_PHONE, CLIENT_PHONES
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Bo7dPcqow4LhD4FcWaD2hJ
+---
+ app.py     | 234 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ index.html |  60 ++++++++++++++
+ 2 files changed, 294 insertions(+)
+
+diff --git a/app.py b/app.py
+index 9943119..3c578f1 100644
+--- a/app.py
++++ b/app.py
+@@ -317,6 +317,179 @@ def order():
+     return jsonify({"id": str(o.id), "status": str(o.status), "account": account})
+ 
+ 
++# ---------------- email ----------------
++EMAIL_FROM         = os.getenv("EMAIL_FROM", "")
++EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD", "")
++ALERT_EMAIL        = os.getenv("ALERT_EMAIL", "")        # your personal alert address
++CLIENT_EMAILS_RAW  = os.getenv("CLIENT_EMAILS", "")      # comma-separated client list
++TWILIO_SID         = os.getenv("TWILIO_ACCOUNT_SID", "")
++TWILIO_TOKEN       = os.getenv("TWILIO_AUTH_TOKEN", "")
++TWILIO_FROM        = os.getenv("TWILIO_FROM", "")        # your Twilio phone number e.g. +12795551234
++ALERT_PHONE        = os.getenv("ALERT_PHONE", "")        # your personal phone e.g. +12795556789
++CLIENT_PHONES_RAW  = os.getenv("CLIENT_PHONES", "")      # comma-separated client phone numbers
++
++
++def _build_email_html(results, ai):
++    """Return a polished HTML email body for the scan results."""
++    today = datetime.now().strftime("%B %d, %Y")
++    rows = ""
++    for r in results:
++        pct  = f"{r['annualized']*100:.1f}%"
++        prem = f"${r['premium']:.2f}"
++        otm  = f"{r['otm']*100:.1f}%"
++        rows += (
++            f"<tr>"
++            f"<td style='padding:8px 12px;font-weight:600'>{r['ticker']}</td>"
++            f"<td style='padding:8px 12px'>{r['contract']}</td>"
++            f"<td style='padding:8px 12px'>${r['strike']:.2f}</td>"
++            f"<td style='padding:8px 12px'>{r['expiry']} ({r['dte']}d)</td>"
++            f"<td style='padding:8px 12px;color:#16a34a'>{prem}</td>"
++            f"<td style='padding:8px 12px;color:#16a34a'>{pct} ann.</td>"
++            f"<td style='padding:8px 12px'>{otm} OTM</td>"
++            f"<td style='padding:8px 12px'>{r['delta']:.3f} Δ</td>"
++            f"</tr>"
++        )
++    pick_block = ""
++    if ai:
++        conf_color = {"high": "#16a34a", "medium": "#d97706", "low": "#dc2626"}.get(
++            (ai.get("confidence") or "").lower(), "#555"
++        )
++        pick_block = f"""
++        <div style='margin:24px 0;padding:16px 20px;background:#f8fafc;border-left:4px solid #2563eb;border-radius:4px'>
++          <p style='margin:0 0 6px;font-size:13px;color:#555;text-transform:uppercase;letter-spacing:.05em'>AI Pick</p>
++          <p style='margin:0 0 8px;font-size:18px;font-weight:700;color:#111'>
++            {ai.get('pick','—')}
++            <span style='font-size:13px;font-weight:500;color:{conf_color};margin-left:8px'>{ai.get('confidence','').upper()} confidence</span>
++          </p>
++          <p style='margin:0;font-size:14px;color:#333;line-height:1.6'>{ai.get('summary','')}</p>
++        </div>"""
++    return f"""<!DOCTYPE html>
++<html><head><meta charset='utf-8'></head>
++<body style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#111;max-width:780px;margin:0 auto;padding:24px'>
++  <h1 style='font-size:22px;margin:0 0 4px'>Weekly Put Scanner — {today}</h1>
++  <p style='color:#555;margin:0 0 20px;font-size:14px'>Cash-secured put candidates near 20Δ</p>
++  {pick_block}
++  <table style='width:100%;border-collapse:collapse;font-size:13px'>
++    <thead>
++      <tr style='background:#f1f5f9'>
++        <th style='padding:8px 12px;text-align:left'>Ticker</th>
++        <th style='padding:8px 12px;text-align:left'>Contract</th>
++        <th style='padding:8px 12px;text-align:left'>Strike</th>
++        <th style='padding:8px 12px;text-align:left'>Expiry</th>
++        <th style='padding:8px 12px;text-align:left'>Premium</th>
++        <th style='padding:8px 12px;text-align:left'>Yield</th>
++        <th style='padding:8px 12px;text-align:left'>OTM%</th>
++        <th style='padding:8px 12px;text-align:left'>Delta</th>
++      </tr>
++    </thead>
++    <tbody>{rows}</tbody>
++  </table>
++  <hr style='border:none;border-top:1px solid #e2e8f0;margin:24px 0'>
++  <p style='font-size:12px;color:#888;margin:0'>
++    Sent by your put-scanner app · Data via yfinance · Not financial advice
++  </p>
++</body></html>"""
++
++
++@app.post("/api/email-results")
++def email_results():
++    if not EMAIL_FROM or not EMAIL_APP_PASSWORD:
++        return fail(503, "EMAIL_FROM and EMAIL_APP_PASSWORD are not set in Vercel.")
++    body = request.get_json(force=True) or {}
++    results = body.get("results", [])
++    ai      = body.get("ai")
++    if not results:
++        return fail(400, "No results to email.")
++
++    recipients = []
++    if ALERT_EMAIL:
++        recipients += [e.strip() for e in ALERT_EMAIL.split(",") if e.strip()]
++    extra = body.get("extra_emails", "")
++    if extra:
++        recipients += [e.strip() for e in extra.split(",") if e.strip()]
++    if CLIENT_EMAILS_RAW:
++        recipients += [e.strip() for e in CLIENT_EMAILS_RAW.split(",") if e.strip()]
++    recipients = list(dict.fromkeys(recipients))  # dedup, preserve order
++    if not recipients:
++        return fail(400, "No recipient emails configured. Set ALERT_EMAIL or CLIENT_EMAILS in Vercel.")
++
++    today   = datetime.now().strftime("%b %d, %Y")
++    subject = f"Put Scanner Results — {today}"
++    html    = _build_email_html(results, ai)
++
++    import smtplib
++    from email.mime.multipart import MIMEMultipart
++    from email.mime.text      import MIMEText
++
++    failed = []
++    for to in recipients:
++        try:
++            msg = MIMEMultipart("alternative")
++            msg["Subject"] = subject
++            msg["From"]    = EMAIL_FROM
++            msg["To"]      = to
++            msg.attach(MIMEText(html, "html"))
++            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as srv:
++                srv.login(EMAIL_FROM, EMAIL_APP_PASSWORD)
++                srv.sendmail(EMAIL_FROM, to, msg.as_string())
++        except Exception as e:
++            failed.append({"to": to, "error": str(e)})
++
++    sent = len(recipients) - len(failed)
++    return jsonify({"sent": sent, "failed": failed, "recipients": recipients})
++
++
++# ---------------- sms ----------------
++@app.post("/api/text-results")
++def text_results():
++    if not TWILIO_SID or not TWILIO_TOKEN or not TWILIO_FROM:
++        return fail(503, "TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM are not set in Vercel.")
++    body_json = request.get_json(force=True) or {}
++    results   = body_json.get("results", [])
++    ai        = body_json.get("ai")
++    if not results:
++        return fail(400, "No results to text.")
++
++    recipients = []
++    if ALERT_PHONE:
++        recipients += [p.strip() for p in ALERT_PHONE.split(",") if p.strip()]
++    extra = body_json.get("extra_phones", "")
++    if extra:
++        recipients += [p.strip() for p in extra.split(",") if p.strip()]
++    if CLIENT_PHONES_RAW:
++        recipients += [p.strip() for p in CLIENT_PHONES_RAW.split(",") if p.strip()]
++    recipients = list(dict.fromkeys(recipients))
++    if not recipients:
++        return fail(400, "No phone numbers configured. Set ALERT_PHONE or CLIENT_PHONES in Vercel.")
++
++    today = datetime.now().strftime("%b %d")
++    top   = results[0]
++    pick  = (ai or {}).get("pick") or top["ticker"]
++    conf  = (ai or {}).get("confidence", "")
++    conf_str = f" ({conf} confidence)" if conf else ""
++
++    lines = [f"Put Scanner {today}{conf_str}"]
++    lines.append(f"Top pick: {pick}")
++    for r in results[:4]:
++        ann   = f"{r['annualized']*100:.0f}%"
++        lines.append(f"  {r['ticker']} ${r['strike']:.0f} exp {r['expiry']} — ${r['bid']:.2f} bid / {ann} ann.")
++    lines.append("Not financial advice.")
++    sms_body = "\n".join(lines)
++
++    from twilio.rest import Client as TwilioClient
++    client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
++
++    failed = []
++    for to in recipients:
++        try:
++            client.messages.create(body=sms_body, from_=TWILIO_FROM, to=to)
++        except Exception as e:
++            failed.append({"to": to, "error": str(e)})
++
++    sent = len(recipients) - len(failed)
++    return jsonify({"sent": sent, "failed": failed, "recipients": recipients})
++
++
+ # ---------------- news ----------------
+ @app.get("/api/news")
+ def news():
+@@ -507,6 +680,13 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
+ .news-title { font-size: .95rem; font-weight: 600; line-height: 1.4; flex: 1; }
+ .news-source { font-size: .82rem; color: var(--muted); }
+ .news-empty { color: var(--muted); font-size: .95rem; padding: 12px 0; }
++/* email */
++.email-bar { display:flex; align-items:center; gap:10px; margin-top:20px; flex-wrap:wrap; }
++.email-bar input[type=email] { flex:1; min-width:220px; max-width:340px; padding:8px 12px;
++  border:1px solid var(--border); border-radius:6px; background:var(--card); color:var(--fg);
++  font-size:.9rem; }
++.email-bar input[type=email]::placeholder { color:var(--muted); }
++#email-status { font-size:.85rem; color:var(--muted); }
+ </style>
+ </head>
+ <body>
+@@ -582,6 +762,15 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
+         </div>
+       </div>
+     </div>
++
++    <!-- email + text results bar -->
++    <div class="email-bar" id="email-bar" style="display:none">
++      <input type="email" id="extra-emails" placeholder="Add client emails (comma-separated, optional)">
++      <button id="email-btn" class="secondary" type="button">✉ Email Results</button>
++      <input type="tel" id="extra-phones" placeholder="Add phones e.g. +12795551234">
++      <button id="text-btn" class="secondary" type="button">📱 Text Results</button>
++      <span id="email-status"></span>
++    </div>
+   </section>
+ 
+   <section class="news-section">
+@@ -729,9 +918,53 @@ function renderResults() {
+   msg($("#order-msg"), "");
+   selectTicket(top.ticker);
+   $("#results").classList.remove("hidden");
++  $("#email-bar").style.display = "flex";
+   loadNews(results.map(r => r.ticker).join(","));
+ }
+ 
++// ---------- email ----------
++$("#email-btn").addEventListener("click", async () => {
++  const btn = $("#email-btn"), status = $("#email-status");
++  const extra = $("#extra-emails").value.trim();
++  btn.disabled = true; btn.textContent = "Sending…"; status.textContent = "";
++  try {
++    const ai = window._lastAI || null;
++    const d = await api("/email-results", {
++      method: "POST",
++      body: JSON.stringify({ results, ai, extra_emails: extra }),
++    });
++    status.textContent = `✓ Sent to ${d.sent} recipient${d.sent !== 1 ? "s" : ""}` +
++      (d.failed.length ? ` · ${d.failed.length} failed` : "");
++    status.style.color = d.failed.length ? "var(--accent)" : "#16a34a";
++  } catch (e) {
++    status.textContent = "✗ " + e.message;
++    status.style.color = "var(--accent)";
++  } finally {
++    btn.disabled = false; btn.textContent = "✉ Email Results";
++  }
++});
++
++// ---------- text ----------
++$("#text-btn").addEventListener("click", async () => {
++  const btn = $("#text-btn"), status = $("#email-status");
++  const extra = $("#extra-phones").value.trim();
++  btn.disabled = true; btn.textContent = "Sending…"; status.textContent = "";
++  try {
++    const d = await api("/text-results", {
++      method: "POST",
++      body: JSON.stringify({ results, ai: window._lastAI || null, extra_phones: extra }),
++    });
++    status.textContent = `📱 Texted ${d.sent} recipient${d.sent !== 1 ? "s" : ""}` +
++      (d.failed.length ? ` · ${d.failed.length} failed` : "");
++    status.style.color = d.failed.length ? "var(--accent)" : "#16a34a";
++  } catch (e) {
++    status.textContent = "✗ " + e.message;
++    status.style.color = "var(--accent)";
++  } finally {
++    btn.disabled = false; btn.textContent = "📱 Text Results";
++  }
++});
++
+ // ---------- AI ----------
+ $("#analyze-btn").addEventListener("click", async () => {
+   const btn = $("#analyze-btn"), out = $("#ai-out");
+@@ -760,6 +993,7 @@ $("#analyze-btn").addEventListener("click", async () => {
+       out.appendChild(n);
+     }
+     if (results.some((r) => r.ticker === a.pick)) selectTicket(a.pick);
++    window._lastAI = a;  // store for email
+   } catch (e) { msg(out, e.message); }
+   finally { btn.disabled = false; btn.textContent = "Review with AI"; }
+ });
+diff --git a/index.html b/index.html
+index 296bdeb..80f928e 100644
+--- a/index.html
++++ b/index.html
+@@ -115,6 +115,13 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
+ .news-title { font-size: .95rem; font-weight: 600; line-height: 1.4; flex: 1; }
+ .news-source { font-size: .82rem; color: var(--muted); }
+ .news-empty { color: var(--muted); font-size: .95rem; padding: 12px 0; }
++/* email */
++.email-bar { display:flex; align-items:center; gap:10px; margin-top:20px; flex-wrap:wrap; }
++.email-bar input[type=email] { flex:1; min-width:220px; max-width:340px; padding:8px 12px;
++  border:1px solid var(--border); border-radius:6px; background:var(--card); color:var(--fg);
++  font-size:.9rem; }
++.email-bar input[type=email]::placeholder { color:var(--muted); }
++#email-status { font-size:.85rem; color:var(--muted); }
+ </style>
+ </head>
+ <body>
+@@ -177,6 +184,15 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
+         <div id="order-msg"></div>
+       </div>
+     </div>
++
++    <!-- email + text results bar -->
++    <div class="email-bar" id="email-bar" style="display:none">
++      <input type="email" id="extra-emails" placeholder="Add client emails (comma-separated, optional)">
++      <button id="email-btn" class="secondary" type="button">✉ Email Results</button>
++      <input type="tel" id="extra-phones" placeholder="Add phones e.g. +12795551234">
++      <button id="text-btn" class="secondary" type="button">📱 Text Results</button>
++      <span id="email-status"></span>
++    </div>
+   </section>
+ 
+   <section class="news-section">
+@@ -281,6 +297,7 @@ $("#scan-form").addEventListener("submit", async (ev) => {
+     if (data.errors.length) msg($("#scan-msg"), data.errors.join(" · "), "info");
+     if (!results.length) { $("#results").classList.add("hidden"); msg($("#scan-msg"), "No results. Check the tickers or widen the days-out range."); return; }
+     renderResults();
++    $("#email-bar").style.display = "flex";
+     loadNews(data.results.map(r => r.ticker).join(","));
+   } catch (e) {
+     msg($("#scan-msg"), e.message);
+@@ -343,10 +360,53 @@ $("#analyze-btn").addEventListener("click", async () => {
+       out.appendChild(n);
+     }
+     if (results.some((r) => r.ticker === a.pick)) selectTicket(a.pick);
++    window._lastAI = a;
+   } catch (e) { msg(out, e.message); }
+   finally { btn.disabled = false; btn.textContent = "Review with AI"; }
+ });
+ 
++// ---------- email ----------
++$("#email-btn").addEventListener("click", async () => {
++  const btn = $("#email-btn"), status = $("#email-status");
++  const extra = $("#extra-emails").value.trim();
++  btn.disabled = true; btn.textContent = "Sending…"; status.textContent = "";
++  try {
++    const d = await api("/email-results", {
++      method: "POST",
++      body: JSON.stringify({ results, ai: window._lastAI || null, extra_emails: extra }),
++    });
++    status.textContent = `✓ Sent to ${d.sent} recipient${d.sent !== 1 ? "s" : ""}` +
++      (d.failed.length ? ` · ${d.failed.length} failed` : "");
++    status.style.color = d.failed.length ? "var(--accent)" : "#16a34a";
++  } catch (e) {
++    status.textContent = "✗ " + e.message;
++    status.style.color = "var(--accent)";
++  } finally {
++    btn.disabled = false; btn.textContent = "✉ Email Results";
++  }
++});
++
++// ---------- text ----------
++$("#text-btn").addEventListener("click", async () => {
++  const btn = $("#text-btn"), status = $("#email-status");
++  const extra = $("#extra-phones").value.trim();
++  btn.disabled = true; btn.textContent = "Sending…"; status.textContent = "";
++  try {
++    const d = await api("/text-results", {
++      method: "POST",
++      body: JSON.stringify({ results, ai: window._lastAI || null, extra_phones: extra }),
++    });
++    status.textContent = `📱 Texted ${d.sent} recipient${d.sent !== 1 ? "s" : ""}` +
++      (d.failed.length ? ` · ${d.failed.length} failed` : "");
++    status.style.color = d.failed.length ? "var(--accent)" : "#16a34a";
++  } catch (e) {
++    status.textContent = "✗ " + e.message;
++    status.style.color = "var(--accent)";
++  } finally {
++    btn.disabled = false; btn.textContent = "📱 Text Results";
++  }
++});
++
+ function current() { return results.find((r) => r.ticker === $("#o-ticker").value); }
+ function account() { return document.querySelector('input[name="acct"]:checked').value; }
+ 
+-- 
+2.43.0
+
+
+From 95323dc9cd43371c4f385c0a48048abca2ecb193 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 27 Oct 2026 18:57:19 -0700
+Subject: [PATCH 3/3] Add IV Rank and Earnings Warning to scanner
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- iv_rank(): approximate IV rank from 30-day rolling HV percentile over 1 year
+- earnings_in_window(): warns if earnings fall within the user's DTE window
+- scan_ticker() fetches 1yr history, returns iv_rank and earnings fields
+- Table header updated with IV Rank and Earnings columns
+- Row builder colors IV rank green/amber/grey and shows ⚠ earnings badge
+- Rows with upcoming earnings get a subtle red highlight
+- CSS added for .ivr-high, .ivr-mid, .ivr-low, .earnings-warn, .has-earnings
+- index.html fully mirrored with all the above changes + Trade link column
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Bo7dPcqow4LhD4FcWaD2hJ
+---
+ app.py     | 95 ++++++++++++++++++++++++++++++++++++++++++++++++------
+ index.html | 38 +++++++++++++++++++---
+ 2 files changed, 119 insertions(+), 14 deletions(-)
+
+diff --git a/app.py b/app.py
+index 3c578f1..110f156 100644
+--- a/app.py
++++ b/app.py
+@@ -84,15 +84,70 @@ def pick_expiry(expirations, min_dte, max_dte):
+     return None, None
+ 
+ 
++def iv_rank(closes_1y, current_iv):
++    """Approximate IV rank: where current_iv sits in the 30-day HV range over the past year.
++    Returns 0-100 (higher = IV elevated vs history; good time to sell premium)."""
++    try:
++        import statistics
++        if len(closes_1y) < 32:
++            return None
++        hvs = []
++        for i in range(30, len(closes_1y)):
++            window = closes_1y[i - 30: i]
++            log_rets = [math.log(window[j] / window[j - 1]) for j in range(1, len(window)) if window[j - 1] > 0]
++            if len(log_rets) < 2:
++                continue
++            hv = statistics.stdev(log_rets) * math.sqrt(252)
++            hvs.append(hv)
++        if not hvs:
++            return None
++        lo, hi = min(hvs), max(hvs)
++        if hi <= lo:
++            return None
++        rank = (current_iv - lo) / (hi - lo) * 100
++        return round(max(0.0, min(100.0, rank)), 1)
++    except Exception:
++        return None
++
++
++def earnings_in_window(tk, max_dte):
++    """Return the nearest earnings date string if it falls within max_dte days, else None."""
++    try:
++        cal = tk.calendar
++        if cal is None:
++            return None
++        # calendar can be a dict or a DataFrame depending on yfinance version
++        if hasattr(cal, "to_dict"):
++            cal = cal.to_dict()
++        dates = cal.get("Earnings Date") or cal.get("earningsDate") or []
++        if not dates:
++            return None
++        today = date.today()
++        cutoff = today.toordinal() + max_dte
++        for d in (dates if isinstance(dates, list) else [dates]):
++            if hasattr(d, "date"):
++                d = d.date()
++            if isinstance(d, datetime):
++                d = d.date()
++            if isinstance(d, date) and today <= d and d.toordinal() <= cutoff:
++                return d.strftime("%b %d")
++        return None
++    except Exception:
++        return None
++
++
+ def scan_ticker(ticker, target, min_dte, max_dte, rate=0.04):
+     import yfinance as yf
+ 
+     tk = yf.Ticker(ticker)
+-    hist = tk.history(period="1mo")
++    # fetch 1 year for IV rank; fall back gracefully
++    hist_1y = tk.history(period="1y")
++    hist = hist_1y if not hist_1y.empty else tk.history(period="1mo")
+     if hist.empty:
+         raise ValueError(f"{ticker}: no price data")
+-    closes = [round(num(c), 2) for c in hist["Close"].tolist()]
+-    spot = closes[-1]
++    closes_1y = [round(num(c), 2) for c in hist["Close"].tolist()]
++    closes = closes_1y[-22:] if len(closes_1y) >= 22 else closes_1y   # ~1mo for sparkline
++    spot = closes_1y[-1]
+ 
+     expiry, dte = pick_expiry(list(tk.options), min_dte, max_dte)
+     if expiry is None:
+@@ -115,14 +170,17 @@ def scan_ticker(ticker, target, min_dte, max_dte, rate=0.04):
+     mid = (bid + ask) / 2 if ask > 0 else bid
+     yld = bid / strike
+     contract = str(best["contractSymbol"])
++    current_iv = num(best["impliedVolatility"])
+     ts = int(time.time())
+     return {
+         "ticker": ticker, "contract": contract, "price": spot, "expiry": expiry, "dte": dte,
+         "strike": strike, "delta": round(num(best["delta"]), 3), "bid": bid, "mid": round(mid, 2),
+-        "iv": round(num(best["impliedVolatility"]), 4), "premium": round(bid * 100, 2),
++        "iv": round(current_iv, 4), "premium": round(bid * 100, 2),
+         "collateral": round(strike * 100, 2), "yield": yld, "annualized": yld * 365 / max(dte, 1),
+         "otm": 1 - strike / spot, "change_1m": spot / closes[0] - 1 if closes[0] else 0.0,
+         "trend": closes, "ticket": {"ts": ts, "sig": sign(contract, ts)},
++        "iv_rank": iv_rank(closes_1y, current_iv),
++        "earnings": earnings_in_window(tk, max_dte),
+     }
+ 
+ 
+@@ -576,6 +634,15 @@ h2 { font-size: 1rem; font-weight: 600; margin: 0 0 12px; }
+ .muted { color: var(--muted); }
+ .hidden { display: none !important; }
+ 
++/* IV rank badges */
++.ivr-high { color: #16a34a; font-weight: 700; }
++.ivr-mid  { color: #d97706; font-weight: 600; }
++.ivr-low  { color: var(--muted); }
++
++/* Earnings warning */
++.earnings-warn { color: #dc2626; font-weight: 700; font-size: .8rem; white-space: nowrap; }
++tr.has-earnings { background: rgba(220,38,38,.04); }
++
+ /* controls */
+ label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+ input, select {
+@@ -715,7 +782,7 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
+       <table>
+         <thead><tr>
+           <th>Ticker</th><th>Price</th><th>Strike</th><th>Expires</th><th>Delta</th><th>Bid</th>
+-          <th>IV</th><th>Below price</th><th>Annualized</th><th>1 month</th><th>Trade</th>
++          <th>IV</th><th>IV Rank</th><th>Below price</th><th>Annualized</th><th>1 month</th><th>Earnings</th><th>Trade</th>
+         </tr></thead>
+         <tbody id="tbody"></tbody>
+       </table>
+@@ -902,15 +969,25 @@ function renderResults() {
+     </div>`).join("");
+   requestAnimationFrame(() => document.querySelectorAll("#bars .fill").forEach((f, i) => { f.style.width = (results[i].yield / max * 100) + "%"; }));
+ 
+-  $("#tbody").innerHTML = results.map((r) => `
+-    <tr>
++  $("#tbody").innerHTML = results.map((r) => {
++    const ivr = r.iv_rank != null ? r.iv_rank : null;
++    const ivrClass = ivr == null ? "muted" : ivr >= 50 ? "ivr-high" : ivr >= 25 ? "ivr-mid" : "ivr-low";
++    const ivrLabel = ivr == null ? "—" : ivr.toFixed(0);
++    const earningsCell = r.earnings
++      ? `<td><span class="earnings-warn" title="Earnings ${r.earnings} — inside your DTE window">⚠ ${r.earnings}</span></td>`
++      : `<td class="muted">—</td>`;
++    return `<tr${r.earnings ? ' class="has-earnings"' : ''}>
+       <td><strong>${r.ticker}</strong></td><td>${usd(r.price)}</td><td>${usd(r.strike)}</td>
+       <td>${fmtDate(r.expiry)} <span class="muted">(${r.dte}d)</span></td><td>${r.delta.toFixed(2)}</td>
+-      <td>${usd(r.bid)}</td><td>${pct(r.iv, 0)}</td><td>${pct(r.otm, 1)}</td><td>${pct(r.annualized, 0)}</td>
++      <td>${usd(r.bid)}</td><td>${pct(r.iv, 0)}</td>
++      <td><span class="${ivrClass}">${ivrLabel}</span></td>
++      <td>${pct(r.otm, 1)}</td><td>${pct(r.annualized, 0)}</td>
+       <td>${sparkline(r.trend)} <span class="muted">${(r.change_1m >= 0 ? "+" : "") + pct(r.change_1m, 1)}</span></td>
++      ${earningsCell}
+       <td><a class="trade" href="https://robinhood.com/options/chains/${encodeURIComponent(r.ticker)}" target="_blank" rel="noopener noreferrer"
+         aria-label="Open ${r.ticker} options chain in Robinhood">Open in Robinhood ↗</a></td>
+-    </tr>`).join("");
++    </tr>`;
++  }).join("");
+ 
+   const sel = $("#o-ticker");
+   sel.innerHTML = results.map((r) => `<option value="${r.ticker}">${r.ticker} ${usd(r.strike)} put</option>`).join("");
+diff --git a/index.html b/index.html
+index 80f928e..36f8bb8 100644
+--- a/index.html
++++ b/index.html
+@@ -37,6 +37,16 @@ h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 20px; }
+ h2 { font-size: 1rem; font-weight: 600; margin: 0 0 12px; }
+ .muted { color: var(--muted); }
+ .hidden { display: none !important; }
++
++/* IV rank badges */
++.ivr-high { color: #16a34a; font-weight: 700; }
++.ivr-mid  { color: #d97706; font-weight: 600; }
++.ivr-low  { color: var(--muted); }
++
++/* Earnings warning */
++.earnings-warn { color: #dc2626; font-weight: 700; font-size: .8rem; white-space: nowrap; }
++tr.has-earnings { background: rgba(220,38,38,.04); }
++
+ label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+ input, select {
+   font: inherit; color: var(--ink); background: var(--surface);
+@@ -75,6 +85,12 @@ th, td { padding: 10px 8px; text-align: right; border-bottom: 1px solid var(--ru
+ th { font-weight: 500; color: var(--muted); }
+ th:first-child, td:first-child { text-align: left; }
+ td svg { vertical-align: middle; }
++a.trade {
++  display: inline-block; font-weight: 600; font-size: .85rem; text-decoration: none;
++  padding: 5px 10px; border-radius: 6px; border: 1px solid var(--ink); color: var(--ink);
++}
++a.trade:hover { background: var(--ink); color: var(--bg); }
++a.trade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+ .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px; }
+ @media (max-width: 820px) { .panels { grid-template-columns: 1fr; } }
+ .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 20px; }
+@@ -148,7 +164,7 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
+       <table>
+         <thead><tr>
+           <th>Ticker</th><th>Price</th><th>Strike</th><th>Expires</th><th>Delta</th><th>Bid</th>
+-          <th>IV</th><th>Below price</th><th>Annualized</th><th>1 month</th>
++          <th>IV</th><th>IV Rank</th><th>Below price</th><th>Annualized</th><th>1 month</th><th>Earnings</th><th>Trade</th>
+         </tr></thead>
+         <tbody id="tbody"></tbody>
+       </table>
+@@ -318,13 +334,25 @@ function renderResults() {
+       <span class="v">${pct(r.yield)}<\/span>
+     <\/div>`).join("");
+   requestAnimationFrame(() => document.querySelectorAll("#bars .fill").forEach((f, i) => { f.style.width = (results[i].yield / max * 100) + "%"; }));
+-  $("#tbody").innerHTML = results.map((r) => `
+-    <tr>
++  $("#tbody").innerHTML = results.map((r) => {
++    const ivr = r.iv_rank != null ? r.iv_rank : null;
++    const ivrClass = ivr == null ? "muted" : ivr >= 50 ? "ivr-high" : ivr >= 25 ? "ivr-mid" : "ivr-low";
++    const ivrLabel = ivr == null ? "—" : ivr.toFixed(0);
++    const earningsCell = r.earnings
++      ? `<td><span class="earnings-warn" title="Earnings ${r.earnings} — inside your DTE window">⚠ ${r.earnings}<\/span><\/td>`
++      : `<td class="muted">—<\/td>`;
++    return `<tr${r.earnings ? ' class="has-earnings"' : ''}>
+       <td><strong>${r.ticker}<\/strong><\/td><td>${usd(r.price)}<\/td><td>${usd(r.strike)}<\/td>
+       <td>${fmtDate(r.expiry)} <span class="muted">(${r.dte}d)<\/span><\/td><td>${r.delta.toFixed(2)}<\/td>
+-      <td>${usd(r.bid)}<\/td><td>${pct(r.iv, 0)}<\/td><td>${pct(r.otm, 1)}<\/td><td>${pct(r.annualized, 0)}<\/td>
++      <td>${usd(r.bid)}<\/td><td>${pct(r.iv, 0)}<\/td>
++      <td><span class="${ivrClass}">${ivrLabel}<\/span><\/td>
++      <td>${pct(r.otm, 1)}<\/td><td>${pct(r.annualized, 0)}<\/td>
+       <td>${sparkline(r.trend)} <span class="muted">${(r.change_1m >= 0 ? "+" : "") + pct(r.change_1m, 1)}<\/span><\/td>
+-    <\/tr>`).join("");
++      ${earningsCell}
++      <td><a class="trade" href="https://robinhood.com/options/chains/${encodeURIComponent(r.ticker)}" target="_blank" rel="noopener noreferrer"
++        aria-label="Open ${r.ticker} options chain in Robinhood">Open in Robinhood ↗<\/a><\/td>
++    <\/tr>`;
++  }).join("");
+   const sel = $("#o-ticker");
+   sel.innerHTML = results.map((r) => `<option value="${r.ticker}">${r.ticker} ${usd(r.strike)} put<\/option>`).join("");
+   $("#ai-out").innerHTML = "";
+-- 
+2.43.0
