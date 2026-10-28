@@ -8,106 +8,38 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;800&display=swap" rel="stylesheet">
-<script src="config.js"></script>
+<script src="/config.js"></script>
 <style>
-:root {
-  --bg: #EEF1F4; --surface: #FFFFFF; --ink: #14213D; --muted: #5C677D;
-  --rule: #C9D1DC; --accent: #0F7B6C; --accent-soft: #D5EDE9
-  --bar: #9AA6BC; --risk: #B3261E; --risk-soft: #F6DEDC;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0E1626; --surface: #16213A; --ink: #E8EDF5; --muted: #9AA6BC;
-    --rule: #2A3754; --accent: #3FB8A3; --accent-soft: #143A36;
-    --bar: #4A5878; --risk: #F08A80; --risk-soft: #3A1E1E;
-    color-scheme: dark;
-  }
-}
-* { box-sizing: border-box; }
-html, body { margin: 0; }
-body {
-  background: var(--bg); color: var(--ink);
-  font: 400 16px/1.5 "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-variant-numeric: tabular-nums;
-  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
-}
-.wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
-h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 20px; }
-h2 { font-size: 1rem; font-weight: 600; margin: 0 0 12px; }
-.muted { color: var(--muted); }
-.hidden { display: none !important; }
-label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
-input, select {
-  font: inherit; color: var(--ink); background: var(--surface);
-  border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; width: 100%;
-}
-input:focus-visible, select:focus-visible, button:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
-}
-button {
-  font: inherit; font-weight: 600; cursor: pointer; border-radius: 6px;
-  padding: 9px 16px; border: 1px solid var(--ink); background: var(--ink); color: var(--bg);
-}
-button.secondary { background: transparent; color: var(--ink); }
-button:disabled { opacity: .4; cursor: not-allowed; }
-.settings {
-  display: grid; gap: 12px; align-items: end;
-  grid-template-columns: 2fr 1fr 1fr 1fr auto;
-  padding-bottom: 24px; border-bottom: 1px solid var(--rule);
-}
-@media (max-width: 720px) { .settings { grid-template-columns: 1fr 1fr; } .settings .tick { grid-column: 1 / -1; } }
-.verdict { padding: 40px 0 8px; }
-.verdict .big { font-size: clamp(2rem, 5.5vw, 3.4rem); font-weight: 800; line-height: 1.08; letter-spacing: -.02em; margin: 0; }
-.verdict .sub { font-size: 1.1rem; color: var(--muted); margin: 12px 0 0; max-width: 62ch; }
-.bars { margin: 32px 0 40px; }
-.bar-row { display: grid; grid-template-columns: 64px 1fr 72px; gap: 14px; align-items: center; padding: 6px 0; }
-.bar-row .t { font-weight: 600; }
-.track { height: 28px; background: transparent; }
-.fill { height: 100%; background: var(--bar); border-radius: 0 4px 4px 0; transition: width .5s ease; }
-.bar-row.win .fill { background: var(--accent); }
-.bar-row .v { text-align: right; font-weight: 600; }
-.bar-row.win .v { color: var(--accent); }
-@media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
-.table-wrap { overflow-x: auto; border-top: 1px solid var(--rule); }
-table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: .92rem; }
-th, td { padding: 10px 8px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
-th { font-weight: 500; color: var(--muted); }
-th:first-child, td:first-child { text-align: left; }
-td svg { vertical-align: middle; }
-.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px; }
-@media (max-width: 820px) { .panels { grid-template-columns: 1fr; } }
-.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 20px; }
-.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-.pick { font-size: 1.4rem; font-weight: 800; margin: 16px 0 4px; }
-.risks { margin: 8px 0 0; padding-left: 18px; }
-.risks li { margin-bottom: 4px; }
-.notes { margin-top: 12px; font-size: .9rem; color: var(--muted); }
-.ticket-summary { background: var(--bg); border-radius: 6px; padding: 12px; margin: 12px 0; font-size: .95rem; }
-.check { display: flex; gap: 10px; align-items: flex-start; font-size: .92rem; color: var(--ink); margin: 12px 0; }
-.check input { width: auto; margin-top: 4px; }
-.seg { display: flex; gap: 8px; }
-.seg label { display: flex; gap: 6px; align-items: center; color: var(--ink); margin: 0; font-size: .95rem; }
-.seg input { width: auto; }
-.msg { border-radius: 6px; padding: 10px 12px; margin: 12px 0 0; font-size: .92rem; }
-.msg.err { background: var(--risk-soft); color: var(--risk); }
-.msg.ok { background: var(--accent-soft); color: var(--accent); }
-.msg.info { background: var(--surface); border: 1px solid var(--rule); color: var(--muted); }
-footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70ch; }
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+:root{color-scheme:dark;--bg:#101613;--panel:#171f1b;--panel-hi:#1d2822;--ink:#edf0e9;--muted:#92a198;--line:#334139;--accent:#d5f36a;--accent-ink:#1b2414;--risk:#ee8376;--good:#a8df9c;--warn:#f0ae74;--bad:#ee8376;--mono:'IBM Plex Mono',monospace;--sans:'DM Sans',sans-serif}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse at 85% -12%,#25372b 0,transparent 42%),var(--bg);color:var(--ink);font:400 15px/1.5 var(--sans);padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0);min-height:100vh}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.wrap{max-width:1320px;margin:0 auto;padding:0 36px 64px}.hidden{display:none!important}.muted{color:var(--muted)}
+.topbar{height:76px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--ink);font:600 13px var(--mono);letter-spacing:.12em}.brand-mark{display:grid;place-items:center;width:32px;height:32px;background:var(--accent);color:var(--accent-ink);border-radius:9px;font:bold 16px var(--mono)}.top-meta{display:flex;align-items:center;gap:10px;color:var(--muted);font:11px var(--mono);letter-spacing:.08em}.live-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px #d5f36a66}
+.intro{display:flex;justify-content:space-between;align-items:flex-end;gap:28px;padding:54px 0 34px}.kicker{font:500 10px var(--mono);letter-spacing:.16em;color:var(--accent);text-transform:uppercase;margin:0 0 13px}.intro h1{font-size:clamp(2.5rem,5vw,4.5rem);letter-spacing:-.07em;line-height:.98;margin:0;max-width:700px;font-weight:600}.intro h1 em{font-style:normal;color:var(--accent)}.intro-copy{color:var(--muted);max-width:560px;margin:18px 0 0;font-size:14px}.intro-side{font:11px/1.8 var(--mono);color:var(--muted);text-align:right;min-width:180px}.intro-side strong{display:block;color:var(--ink);font-size:14px;font-weight:500}.eyeline{display:inline-flex;align-items:center;gap:8px}
+.settings{display:grid;grid-template-columns:minmax(240px,2.1fr) repeat(3,minmax(112px,.72fr)) auto;gap:14px;align-items:end;background:linear-gradient(125deg,#1a241e,#151c18);border:1px solid #3a493f;border-radius:14px;padding:22px;box-shadow:0 18px 50px #0002}.settings label,.row>div>label,.pw-field>label{display:block;color:var(--muted);font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;margin:0 0 8px}.settings input,.row input,.row select,.pw-field input{width:100%;background:#101613;border:1px solid var(--line);border-radius:8px;padding:12px 13px;color:var(--ink);font:13px var(--mono);transition:border-color .2s,background .2s}.settings input:focus,.row input:focus,.row select:focus,.pw-field input:focus{border-color:#91ad57;background:#121a15;outline:none}.scan-submit{height:44px;padding:0 24px;border:0;border-radius:8px;background:var(--accent);color:#1a2414;font-weight:700;font-size:13px;transition:transform .15s,filter .15s}.scan-submit:hover{filter:brightness(1.06);transform:translateY(-1px)}.scan-submit:disabled,button:disabled{opacity:.48;cursor:not-allowed;transform:none}.scan-caption{display:flex;justify-content:space-between;gap:14px;margin:10px 3px 0;color:var(--muted);font:10px var(--mono)}#scan-msg{min-height:12px}
+.msg{border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:11px 14px;margin:12px 0 0;font-size:13px}.msg.err{border-color:#613d37;color:var(--bad)}.msg.ok{border-color:#405a39;color:var(--good)}.msg.info{color:var(--muted)}
+#results{animation:rise .5s cubic-bezier(.2,.8,.2,1) both}.verdict{padding:54px 0 25px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}.verdict .big{font-size:clamp(1.8rem,4vw,3rem);letter-spacing:-.055em;line-height:1.05;font-weight:600;margin:0}.verdict .sub{max-width:520px;margin:0;color:var(--muted);font-size:12px;line-height:1.7}.section-label{font:10px var(--mono);color:var(--muted);letter-spacing:.13em;text-transform:uppercase;margin:0 0 14px}.bars{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:0 0 28px}.bar-row{position:relative;overflow:hidden;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 14px;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;min-height:66px}.bar-row .t{font:600 12px var(--mono)}.bar-row .track{height:3px;background:#334139;border-radius:9px;overflow:hidden}.bar-row .fill{height:100%;background:#78945d;border-radius:9px;transition:width .55s ease}.bar-row.win{border-color:#5e7144;background:linear-gradient(120deg,#222d20,#19211b)}.bar-row.win .fill{background:var(--accent)}.bar-row .v{font:500 12px var(--mono);color:var(--muted)}.bar-row.win .v{color:var(--accent)}
+.table-shell{border:1px solid var(--line);background:#141b17;border-radius:12px;overflow:hidden}.table-top{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--line)}.table-top h2,.panel h2,.news-header h2{font-size:14px;font-weight:600;margin:0;letter-spacing:-.02em}.table-top span{font:10px var(--mono);color:var(--muted)}.table-wrap{overflow:auto}table{width:100%;min-width:850px;border-collapse:collapse;font-size:12px}th,td{padding:14px 13px;text-align:right;border-bottom:1px solid #29352d;white-space:nowrap}th{color:var(--muted);font:10px var(--mono);letter-spacing:.06em;text-transform:uppercase;background:#18211b}th:first-child,td:first-child{text-align:left;padding-left:18px}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:#1b251e}td strong{font:600 12px var(--mono)}td svg{vertical-align:middle}.trade{color:var(--accent);text-decoration:none;font-weight:600}.trade:hover{text-decoration:underline}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:21px}.panel-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:17px}.panel-kicker{font:10px var(--mono);letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin:0 0 5px}.panel h2{font-size:17px}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}.row label{display:block}.panel input,.panel select{min-width:0}.secondary,.quiet-button{border:1px solid #536257;background:transparent;color:var(--ink);border-radius:8px;padding:10px 14px;font-size:12px;font-weight:600;transition:background .15s,border-color .15s}.secondary:hover,.quiet-button:hover{background:#263229;border-color:#84977e}.pick{font-size:1.4rem;font-weight:700;margin:16px 0 4px;color:var(--accent)}.risks{color:#d5ad87;padding-left:18px}.notes{margin-top:12px;color:var(--muted);font-size:12px}.ticket-summary{background:#101613;border:1px solid var(--line);border-radius:8px;padding:13px;margin:12px 0;font-size:12px;color:#c5cfc5}.seg{display:flex;gap:10px}.seg label{display:flex;align-items:center;gap:6px;color:var(--ink);font-size:12px}.seg input,.check input{width:auto;accent-color:var(--accent)}.check{display:flex;gap:9px;align-items:flex-start;color:var(--muted);font-size:11px;margin:14px 0}.check input{margin-top:3px}.pw-field{margin-top:14px}.place-order{width:100%;background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:12px 16px;font-weight:700}.place-order:not(:disabled):hover{filter:brightness(1.08)}.manual{border-top:1px solid var(--line);padding-top:15px;margin-top:20px}.manual h3{font-size:12px;margin:0}.manual dl{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;margin:12px 0;font-size:11px}.manual dt{color:var(--muted)}.manual dd{margin:0;font-weight:600}.news-section{margin-top:56px;padding-top:25px;border-top:1px solid var(--line)}.news-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:15px}.news-header h2{font-size:20px}.news-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}.news-card{display:flex;flex-direction:column;min-height:150px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;color:inherit;text-decoration:none;transition:transform .18s,border-color .18s}.news-card:hover{border-color:#738b5c;transform:translateY(-2px)}.news-meta,.news-source{font:10px var(--mono);color:var(--muted)}.news-badge{color:var(--accent);margin-right:9px}.news-title{font-size:14px;line-height:1.4;font-weight:600;margin:14px 0 auto}.news-source{margin-top:14px}.news-empty{color:var(--muted);font-size:12px}.message-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:17px;padding:16px;background:var(--panel);border:1px solid var(--line);border-radius:10px}#message-status{font-size:11px;color:var(--muted)}footer{margin-top:52px;border-top:1px solid var(--line);padding-top:20px;color:var(--muted);font-size:11px;max-width:90ch}footer a{color:var(--accent)}
+.assistant-section{margin-top:36px;border:1px solid #3a493f;border-radius:14px;background:linear-gradient(145deg,#1a241e,#141b17);overflow:hidden}.assistant-head{display:flex;align-items:center;justify-content:space-between;padding:19px 21px;border-bottom:1px solid var(--line)}.assistant-title{display:flex;align-items:center;gap:11px}.assistant-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font:600 16px var(--mono)}.assistant-head h2{font-size:16px;margin:0}.assistant-head p{font-size:11px;color:var(--muted);margin:3px 0 0}.assistant-state{font:10px var(--mono);color:var(--good)}.chat-log{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow:auto;padding:17px 21px}.chat-bubble{max-width:min(82%,720px);white-space:pre-wrap;overflow-wrap:anywhere;padding:10px 13px;border-radius:11px;background:#202a24;color:var(--ink);font-size:13px;line-height:1.55}.chat-bubble.user{align-self:flex-end;background:#2b382c;border:1px solid #4a5e42}.chat-bubble.assistant{align-self:flex-start;border:1px solid var(--line)}.chat-bubble.error{color:var(--risk)}.chat-form{display:flex;gap:10px;padding:0 21px 17px}.chat-form textarea{flex:1;min-width:0;resize:vertical;min-height:44px;max-height:120px;background:#101613;border:1px solid var(--line);border-radius:8px;padding:11px 13px;color:var(--ink);font:13px var(--sans)}.chat-form button{border:0;border-radius:8px;background:var(--accent);color:var(--accent-ink);padding:0 18px;font-weight:700}.chat-form button:disabled{opacity:.5}.assistant-note{margin:0;padding:0 21px 15px;color:var(--muted);font-size:10px}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+@media(max-width:850px){.wrap{padding:0 22px 48px}.settings{grid-template-columns:1fr 1fr}.settings .tick{grid-column:1/-1}.scan-submit{grid-column:1/-1}.intro{padding:42px 0 25px}.intro-side{display:none}.verdict{display:block;padding:42px 0 20px}.verdict .sub{margin-top:13px}.panels{grid-template-columns:1fr}}
+@media(max-width:520px){.wrap{padding:0 15px 36px}.topbar{height:62px}.top-meta{font-size:9px}.intro{padding:35px 0 23px}.intro h1{font-size:2.7rem}.settings{padding:15px;gap:11px}.settings .tick{grid-column:1/-1}.scan-caption{font-size:9px}.row{gap:9px}.panel{padding:16px}.bar-row{min-height:56px}.message-bar button{width:100%}.assistant-head{padding:15px}.chat-log{padding:14px}.chat-form{flex-direction:column;padding:0 14px 14px}.chat-form button{min-height:42px}.assistant-note{padding:0 14px 14px}.chat-bubble{max-width:94%}}
 </style>
 </head>
 <body>
 
 <main id="app" class="wrap">
-  <h1>Weekly put scanner</h1>
+  <header class="topbar"><a class="brand" href="#top"><span class="brand-mark">P</span><span>PUT / WEEKLY</span></a><div class="top-meta"><span class="live-dot"></span><span>OPTIONS RESEARCH DESK</span><span aria-hidden="true">·</span><span>YAHOO FINANCE DATA</span></div></header>
+  <section class="intro" id="top"><div><p class="kicker">VOLATILITY DESK &nbsp;/&nbsp; WEEKLY SCAN</p><h1>Find the risk.<br><em>Price the put.</em></h1><p class="intro-copy">Compare cash-secured put candidates by premium, distance, and time. Use the scan as a starting point, then confirm every quote with your broker.</p></div><div class="intro-side"><span class="eyeline"><span class="live-dot"></span> DATA STATUS</span><strong>Market feed delayed</strong>Daily close + delayed options chain</div></section>
 
   <form id="scan-form" class="settings">
     <div class="tick"><label for="tickers">Tickers</label><input id="tickers" value="NVDA, NVDL, NVDX, SOXL, TQQQ, SPXL"></div>
     <div><label for="delta">Target delta</label><input id="delta" type="number" min="0.05" max="0.40" step="0.01" value="0.15"></div>
     <div><label for="min-dte">Min days out</label><input id="min-dte" type="number" min="0" max="60" value="4"></div>
     <div><label for="max-dte">Max days out</label><input id="max-dte" type="number" min="1" max="60" value="10"></div>
-    <button type="submit" id="scan-btn">Scan</button>
+    <button class="scan-submit" type="submit" id="scan-btn">Run scan <span aria-hidden="true">↗</span></button>
   </form>
+  <div class="scan-caption"><span>UP TO 12 SYMBOLS &nbsp;·&nbsp; 5–40 DELTA</span><span>ONE SCAN AT A TIME</span></div>
   <div id="scan-msg"></div>
 
   <section id="results" class="hidden">
@@ -115,19 +47,20 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
       <p class="big" id="verdict-big"></p>
       <p class="sub" id="verdict-sub"></p>
     </div>
+    <p class="section-label">PREMIUM YIELD &nbsp;/&nbsp; RANKED HIGH TO LOW</p>
     <div class="bars" id="bars" aria-label="Weekly premium as a percent of strike, highest first"></div>
-    <div class="table-wrap">
+    <div class="table-shell"><div class="table-top"><h2>Candidate matrix</h2><span>OPTION CHAIN / CASH-SECURED PUTS</span></div><div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Ticker</th><th>Price</th><th>Strike</th><th>Expires</th><th>Delta</th><th>Bid</th>
+          <th>Ticker</th><th>Daily close</th><th>Strike</th><th>Expires</th><th>Delta</th><th>Bid</th>
           <th>IV</th><th>Below price</th><th>Annualized</th><th>1 month</th>
         </tr></thead>
         <tbody id="tbody"></tbody>
       </table>
-    </div>
+    </div></div>
     <div class="panels">
       <div class="panel">
-        <h2>AI review</h2>
+        <div class="panel-head"><div><p class="panel-kicker">DECISION SUPPORT</p><h2>AI review</h2></div><span class="live-dot" aria-hidden="true"></span></div>
         <div class="row">
           <div><label for="provider">Provider</label><select id="provider"></select></div>
           <div><label for="model">Model</label><input id="model"></div>
@@ -136,7 +69,7 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
         <div id="ai-out"></div>
       </div>
       <div class="panel">
-        <h2>Order ticket</h2>
+        <div class="panel-head"><div><p class="panel-kicker">BROKER EXECUTION</p><h2>Order ticket</h2></div><span class="panel-kicker">REQUIRES CONFIRMATION</span></div>
         <div class="row">
           <div><label for="o-ticker">Sell put on</label><select id="o-ticker"></select></div>
           <div><label for="o-qty">Contracts</label><input id="o-qty" type="number" min="1" value="1"></div>
@@ -151,13 +84,32 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
           </div>
         </div>
         <div class="ticket-summary" id="o-summary"></div>
+        <div class="pw-field"><label for="o-pw">Order password</label><input id="o-pw" type="password" autocomplete="current-password" placeholder="Enter your app password"></div>
         <label class="check"><input type="checkbox" id="o-confirm"> I've checked this against my broker and want to place it.</label>
-        <button id="order-btn" type="button" disabled>Place order</button>
+        <button class="place-order" id="order-btn" type="button" disabled>Place order</button>
         <div id="order-msg"></div>
       </div>
     </div>
   </section>
 
+
+  <section class="news-section" aria-labelledby="news-heading">
+    <div class="news-header"><h2 id="news-heading">Market News</h2><button id="news-btn" class="secondary" type="button">Load News</button></div>
+    <div id="news-out" aria-live="polite"></div>
+  </section>
+  <section class="assistant-section" aria-labelledby="assistant-heading">
+    <div class="assistant-head"><div class="assistant-title"><span class="assistant-mark" aria-hidden="true">?</span><div><h2 id="assistant-heading">App guide</h2><p>Ask how to use a feature or what a screen label means.</p></div></div><span class="assistant-state" id="assistant-state">Connecting…</span></div>
+    <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions">
+      <div class="chat-bubble assistant">Hi! I can walk you through running a scan, reading the candidate matrix, using AI review, checking market news, and preparing a paper order ticket. What would you like help with?</div>
+    </div>
+    <form class="chat-form" id="chat-form"><textarea id="chat-input" rows="1" maxlength="1000" aria-label="Ask the app guide" placeholder="For example: How do I run a scan?"></textarea><button id="chat-send" type="submit" disabled>Ask</button></form>
+    <p class="assistant-note">The guide explains app navigation. It does not choose trades or place orders. AI provider key required.</p>
+  </section>
+  <section class="message-bar hidden" id="message-bar" aria-label="Send scan results">
+    <button id="email-btn" class="secondary" type="button">Email my configured recipients</button>
+    <button id="text-btn" class="secondary" type="button">Text my configured recipients</button>
+    <span id="message-status" role="status"></span>
+  </section>
   <footer>
     Data from Yahoo Finance, delayed about 15 minutes. Delta is calculated from Yahoo's implied volatility.
     The AI only reviews; strike, size, and price come from the scan and your inputs.
@@ -167,7 +119,7 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
 </main>
 
 <script>
-const API = (window.API_URL || "").replace(/\/$/, "");
+const API = (window.API_URL || "/api").replace(/\/$/, "");
 const $ = (s) => document.querySelector(s);
 let cfg = null, results = [], scannedAt = 0;
 
@@ -185,11 +137,10 @@ function msg(el, text, kind = "err") {
   el.appendChild(d);
 }
 
-async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
-    ...opts,
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " },
-  });
+async function api(path, opts = {}, password = "") {
+  const headers = { "Content-Type": "application/json" };
+  if (password) headers.Authorization = "Bearer " + password;
+  const res = await fetch(API + path, { ...opts, headers });
   let body = null;
   try { body = await res.json(); } catch (e) {}
   if (!res.ok) {
@@ -208,12 +159,111 @@ function sparkline(vals) {
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${up ? "var(--accent)" : "var(--risk)"}" stroke-width="1.5"/><\/svg>`;
 }
 
+
+// ---------- market news ----------
+function timeAgo(ts) {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - Number(ts || 0)));
+  if (!ts) return "Date unavailable";
+  if (seconds < 60) return "Just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+async function loadNews(tickers) {
+  const btn = $("#news-btn"), out = $("#news-out");
+  btn.disabled = true; btn.textContent = "Loading…"; out.replaceChildren();
+  try {
+    const symbols = tickers || results.map(r => r.ticker).join(",") || "SPY,QQQ,NVDA";
+    const data = await api("/news?tickers=" + encodeURIComponent(symbols));
+    if (!data.items.length) {
+      const p = document.createElement("p"); p.className = "news-empty";
+      p.textContent = data.errors && data.errors.length ? "News provider unavailable for some symbols." : "No headlines found.";
+      out.append(p); return;
+    }
+    const grid = document.createElement("div"); grid.className = "news-grid";
+    for (const item of data.items) {
+      let url;
+      try { url = new URL(item.url); } catch (_) { continue; }
+      if (url.protocol !== "https:") continue;
+      const card = document.createElement("a"); card.className = "news-card";
+      card.href = url.href; card.target = "_blank"; card.rel = "noopener noreferrer";
+      const meta = document.createElement("div"); meta.className = "news-meta";
+      const badge = document.createElement("span"); badge.className = "news-badge"; badge.textContent = item.ticker;
+      const when = document.createElement("span"); when.textContent = timeAgo(item.published);
+      meta.append(badge, when);
+      const title = document.createElement("div"); title.className = "news-title"; title.textContent = item.title;
+      const source = document.createElement("div"); source.className = "news-source"; source.textContent = item.source || "News source";
+      card.append(meta, title, source); grid.append(card);
+    }
+    out.append(grid);
+  } catch (error) {
+    const p = document.createElement("p"); p.className = "news-empty"; p.textContent = "Could not load news: " + error.message; out.append(p);
+  } finally { btn.disabled = false; btn.textContent = "Refresh"; }
+}
+$("#news-btn").addEventListener("click", () => loadNews());
+
+async function sendScanResults(kind) {
+  const btn = $(kind === "email" ? "#email-btn" : "#text-btn"), status = $("#message-status");
+  btn.disabled = true; status.textContent = "Sending…";
+  try {
+    const response = await api(kind === "email" ? "/email-results" : "/text-results", {
+      method: "POST", body: JSON.stringify({ results })
+    }, $("#o-pw").value);
+    status.textContent = `Sent to ${response.sent} configured recipient(s).`;
+  } catch (error) { status.textContent = error.message; }
+  finally { btn.disabled = false; }
+}
+$("#email-btn").addEventListener("click", () => sendScanResults("email"));
+$("#text-btn").addEventListener("click", () => sendScanResults("text"));
+
+const chatHistory = [];
+function addChatBubble(role, text, error = false) {
+  const bubble = document.createElement("div");
+  bubble.className = `chat-bubble ${role}${error ? " error" : ""}`;
+  bubble.textContent = text;
+  $("#chat-log").appendChild(bubble);
+  $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
+}
+$("#chat-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = $("#chat-input"), button = $("#chat-send");
+  const question = input.value.trim();
+  if (!question || button.disabled) return;
+  chatHistory.push({ role: "user", content: question });
+  if (chatHistory.length > 8) chatHistory.splice(0, chatHistory.length - 8);
+  addChatBubble("user", question);
+  input.value = ""; button.disabled = true; button.textContent = "Thinking…";
+  try {
+    const data = await api("/chat", {
+      method: "POST",
+      body: JSON.stringify({ messages: chatHistory, rows: results }),
+    });
+    chatHistory.push({ role: "assistant", content: data.reply });
+    if (chatHistory.length > 8) chatHistory.splice(0, chatHistory.length - 8);
+    addChatBubble("assistant", data.reply);
+  } catch (error) {
+    chatHistory.pop();
+    input.value = question;
+    addChatBubble("assistant", error.message, true);
+  } finally {
+    button.disabled = !(cfg && cfg.providers.length);
+    button.textContent = "Ask";
+    input.focus();
+  }
+});
+
 async function init() {
   const slow = setTimeout(() => msg($("#scan-msg"), "Waking the server. This can take up to a minute on Render's free plan.", "info"), 2500);
   try {
     cfg = await api("/config");
     clearTimeout(slow);
     msg($("#scan-msg"), "");
+    const hasAssistant = cfg.providers.length > 0;
+    $("#assistant-state").textContent = hasAssistant ? "READY" : "NEEDS AI KEY";
+    $("#assistant-state").style.color = hasAssistant ? "var(--good)" : "var(--warn)";
+    $("#chat-send").disabled = !hasAssistant;
+    $("#chat-input").disabled = !hasAssistant;
+    if (!hasAssistant) $("#chat-input").placeholder = "Add an AI provider key in Vercel to enable the app guide.";
     const sel = $("#provider");
     sel.innerHTML = "";
     cfg.providers.forEach((p) => {
@@ -223,11 +273,16 @@ async function init() {
     });
     const hosted = [...sel.options].find((o) => !o.value.startsWith("Ollama"));
     if (hosted) sel.value = hosted.value;
-    $("#model").value = sel.selectedOptions[0].dataset.model;
+    if (sel.selectedOptions[0]) $("#model").value = sel.selectedOptions[0].dataset.model;
+    $("#analyze-btn").disabled = !cfg.providers.length;
     $("#o-qty").max = cfg.max_contracts;
     $("#live-opt").classList.toggle("hidden", !cfg.live_allowed);
   } catch (e) {
     clearTimeout(slow);
+    $("#assistant-state").textContent = "UNAVAILABLE";
+    $("#assistant-state").style.color = "var(--risk)";
+    $("#chat-input").disabled = true;
+    $("#chat-input").placeholder = "The server could not be reached.";
     msg($("#scan-msg"), "Couldn't reach the server: " + e.message);
   }
 }
@@ -262,7 +317,7 @@ function renderResults() {
   $("#verdict-big").textContent = `${top.ticker} pays ${pct(top.yield)} this week`;
   $("#verdict-sub").textContent =
     `Sell the ${usd(top.strike, top.strike % 1 ? 2 : 0)} put expiring ${fmtDate(top.expiry)} for about ${usd(top.premium, 0)} per contract ` +
-    `on ${usd(top.collateral, 0)} collateral. That's ${pct(top.otm, 1)} below today's price, ${pct(top.annualized, 0)} annualized.`;
+    `on ${usd(top.collateral, 0)} collateral. That is ${pct(top.otm, 1)} below the latest daily close (${top.quote_asof || "date unavailable"}), ${pct(top.annualized, 0)} annualized. Yahoo option quotes may be delayed; check the current broker quote before trading.`;
   const max = Math.max(...results.map((r) => r.yield));
   $("#bars").innerHTML = results.map((r, i) => `
     <div class="bar-row${i === 0 ? " win" : ""}">
@@ -284,6 +339,8 @@ function renderResults() {
   msg($("#order-msg"), "");
   selectTicket(top.ticker);
   $("#results").classList.remove("hidden");
+  $("#message-bar").classList.remove("hidden");
+  loadNews(results.map(r => r.ticker).join(","));
 }
 
 $("#analyze-btn").addEventListener("click", async () => {
@@ -335,12 +392,12 @@ function updateTicket() {
   $("#o-summary").textContent =
     `Sell to open ${qty} × ${r.contract} (${r.ticker} ${usd(r.strike)} put, expires ${fmtDate(r.expiry)}) at ${usd(limit)} limit. ` +
     `Collects about ${usd(limit * 100 * qty, 0)} and ties up ${usd(r.strike * 100 * qty, 0)} in ${account()} account collateral.`;
-  $("#order-btn").disabled = stale || !$("#o-confirm").checked || limit <= 0;
+  $("#order-btn").disabled = stale || !$("#o-confirm").checked || limit <= 0 || !$("#o-pw").value;
   if (stale) msg($("#order-msg"), "Quotes are over 5 minutes old. Scan again before placing an order.", "info");
 }
 
 ["#o-ticker"].forEach((s) => $(s).addEventListener("change", () => selectTicket($("#o-ticker").value)));
-["#o-qty", "#o-limit", "#o-confirm"].forEach((s) => $(s).addEventListener("input", updateTicket));
+["#o-qty", "#o-limit", "#o-pw", "#o-confirm"].forEach((s) => $(s).addEventListener("input", updateTicket));
 document.querySelectorAll('input[name="acct"]').forEach((el) => el.addEventListener("change", () => { $("#o-confirm").checked = false; updateTicket(); }));
 setInterval(() => { if (results.length) updateTicket(); }, 15000);
 
@@ -351,11 +408,11 @@ $("#order-btn").addEventListener("click", async () => {
   try {
     const o = await api("/order", {
       method: "POST",
-      body: JSON.stringify({ contract: r.contract, qty, limit: parseFloat($("#o-limit").value), account: account() }),
-    });
-    msg($("#order-msg"), `Order placed in ${o.account}: ${o.id} (${o.status})`, "ok");
+      body: JSON.stringify({ contract: r.contract, qty, limit: parseFloat($("#o-limit").value), account: account(), ticket: r.ticket, manual_quote_confirmed: $("#o-confirm").checked }),
+    }, $("#o-pw").value);
+    msg($("#order-msg"), `${o.duplicate ? "Existing order" : "Order placed"} in ${o.account}: ${o.id} (${o.status})`, "ok");
     $("#o-confirm").checked = false;
-  } catch (e) { msg($("#order-msg"), e.message); }
+  } catch (e) { msg($("#order-msg"), e.status === 401 ? "Wrong order password." : e.message); }
   finally { btn.textContent = "Place order"; updateTicket(); }
 });
 
@@ -364,12 +421,12 @@ init();
 <script>
   // Keep Render backend alive — ping /health every 10 minutes
   (function () {
-      var url = (window.API_URL || 'https://option-trading-dc1i.onrender.com').replace(/\/$/, '');
-      function ping() { fetch(url + '/health').catch(function () {}); }
+      var apiBase = (window.API_URL || '').replace(/\/$/, '');
+      var healthUrl = apiBase ? apiBase + '/health' : location.origin + '/api/health';
+      function ping() { fetch(healthUrl).catch(function () {}); }
       ping();
       setInterval(ping, 600000);
   })();
 </script>
-  
-</script></body>
+</body>
 </html>
