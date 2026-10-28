@@ -1,2 +1,3 @@
-// Your Render API address (no trailing slash). Change this after Render deploys.
-window.API_URL = "https://option-trading-dc1i.onrender.com";
+// Empty means the Flask app serves the UI and API from the same origin.
+// For a separately hosted frontend, set this to the backend base URL ending in /api.
+window.API_URL = "";
