@@ -1,12 +1,3 @@
-flask>=3.0
-streamlit>=1.36
-yfinance>=0.2.40
-altair
-requests
-python-dotenv
-anthropic
-google-genai
-alpaca-py>=0.30
-pandas
-robin_stocks
-twilio>=9.0
+flask>=3.0streamlit>=1.36yfinance>=0.2.40altairrequestspython-dotenvanthropicgoogle-genaialpaca-py>=0.30pandasrobin_stockstwilio>=9.0
+pymongo
+resend
