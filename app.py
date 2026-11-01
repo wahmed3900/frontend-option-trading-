@@ -31,8 +31,10 @@ from functools import wraps
 
 from flask import Flask, Response, jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
+from smart_signal import router as signal_router
 
 app = Flask(__name__)
+app.register_blueprint(signal_router)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
@@ -792,6 +794,11 @@ a.trade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .news-section { margin-top: 40px; }
 .news-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
 .news-header h2 { margin:0; }
+.filing-controls { display:flex; align-items:end; gap:8px; }
+.filing-controls > div { min-width:120px; }
+.filing-list { list-style:none; margin:12px 0 0; padding:0; }
+.filing-list li { display:flex; justify-content:space-between; gap:16px; padding:10px 0; border-bottom:1px solid var(--rule); }
+.filing-list a { color:var(--ink); }
 .news-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
 .news-card { display:block; background:var(--surface); border:1px solid var(--rule); border-radius:9px; padding:14px; color:inherit; text-decoration:none; }
 .news-card:hover { border-color:var(--accent); }
@@ -878,6 +885,22 @@ footer { margin-top: 48px; font-size: .85rem; color: var(--muted); max-width: 70
         </div>
       </div>
     </div>
+
+    <section class="news-section" aria-labelledby="insider-heading">
+      <div class="news-header">
+        <div>
+          <h2 id="insider-heading">SEC insider filings</h2>
+          <p class="muted" style="margin:4px 0 0">Recent Form 4 reports · SEC EDGAR</p>
+        </div>
+        <div class="filing-controls">
+          <div><label for="insider-ticker">Ticker</label>
+          <select id="insider-ticker" aria-label="Ticker for SEC insider filings"></select></div>
+          <button id="insider-btn" class="secondary" type="button">Load filings</button>
+        </div>
+      </div>
+      <p class="muted">Form 4 reports record changes in insiders’ holdings; the filing itself may not indicate whether a transaction was a buy or sale.</p>
+      <div id="insider-out" aria-live="polite"></div>
+    </section>
   </section>
 
 
@@ -1023,6 +1046,8 @@ function renderResults() {
 
   const sel = $("#o-ticker");
   sel.innerHTML = results.map((r) => `<option value="${r.ticker}">${r.ticker} ${usd(r.strike)} put</option>`).join("");
+  const insiderSel = $("#insider-ticker");
+  insiderSel.innerHTML = results.map((r) => `<option value="${r.ticker}">${r.ticker}</option>`).join("");
   if (!$("#analyze-btn").disabled) $("#ai-out").innerHTML = "";
   msg($("#order-msg"), "");
   selectTicket(top.ticker);
@@ -1030,6 +1055,40 @@ function renderResults() {
   $("#message-bar").classList.remove("hidden");
   loadNews(results.map(r => r.ticker).join(","));
 }
+
+// ---------- SEC insider filings ----------
+$("#insider-btn").addEventListener("click", async () => {
+  const btn = $("#insider-btn"), out = $("#insider-out"), ticker = $("#insider-ticker").value;
+  btn.disabled = true; btn.textContent = "Loading…";
+  out.replaceChildren();
+  try {
+    const data = await api(`/signal/insider/${encodeURIComponent(ticker)}?limit=20`);
+    if (!data.filings.length) {
+      out.textContent = `No recent Form 4 filings found for ${data.ticker}.`;
+      return;
+    }
+    const list = document.createElement("ul");
+    list.className = "filing-list";
+    data.filings.forEach((filing) => {
+      const item = document.createElement("li");
+      const date = document.createElement("time");
+      date.dateTime = filing.date;
+      date.textContent = filing.date;
+      const link = document.createElement("a");
+      link.href = filing.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "View SEC filing ↗";
+      item.append(date, link);
+      list.appendChild(item);
+    });
+    out.appendChild(list);
+  } catch (error) {
+    out.textContent = error instanceof Error ? error.message : "Could not load SEC filings.";
+  } finally {
+    btn.disabled = false; btn.textContent = "Load filings";
+  }
+});
 
 // ---------- AI ----------
 $("#analyze-btn").addEventListener("click", async () => {
