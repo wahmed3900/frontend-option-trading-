@@ -11,3 +11,5 @@ pandas
 robin_stocks
 twilio>=9.0
 motor
+pymongo
+resend

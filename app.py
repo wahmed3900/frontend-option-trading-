@@ -32,7 +32,14 @@ from functools import wraps
 from flask import Flask, Response, jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from smart_signal import router as signal_router
+from signal_follow import router as follow_router
+from signal_check import router as check_router
+
 app = Flask(__name__)
+app.register_blueprint(signal_router)
+app.register_blueprint(follow_router)
+app.register_blueprint(check_router)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
