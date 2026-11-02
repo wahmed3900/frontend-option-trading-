@@ -428,5 +428,174 @@ init();
       setInterval(ping, 600000);
   })();
 </script>
+
+<section id="alert-section" style="max-width:900px;margin:24px auto;padding:0 16px">
+  <div style="background:#18181b;border:1px solid #27272a;border-radius:10px;padding:20px 24px">
+    <h3 style="margin:0 0 12px;font-size:15px;color:#a1a1aa;font-weight:600;letter-spacing:.04em;text-transform:uppercase">Insider Filing Alerts</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input id="alert-email" type="email" placeholder="your@email.com" autocomplete="email"
+        style="flex:1;min-width:200px;background:#09090b;border:1px solid #3f3f46;border-radius:7px;padding:8px 12px;color:#e4e4e7;font-size:13px;outline:none">
+      <input id="alert-pw" type="password" placeholder="App password" autocomplete="current-password"
+        style="flex:1;min-width:160px;background:#09090b;border:1px solid #3f3f46;border-radius:7px;padding:8px 12px;color:#e4e4e7;font-size:13px;outline:none">
+      <button id="save-email-btn" onclick="saveAlertEmail()"
+        style="background:#4f46e5;color:#fff;border:none;border-radius:7px;padding:8px 18px;font-size:13px;cursor:pointer;white-space:nowrap">Save email</button>
+    </div>
+    <p id="alert-status" style="margin:10px 0 0;font-size:12px;color:#71717a"></p>
+    <div id="followed-tickers" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px"></div>
+  </div>
+</section>
+<script>
+(function () {
+  'use strict';
+  var EMAIL_KEY = 'alert_email';
+  var SUBS_KEY = 'alert_subs';
+
+  function getPw() {
+    var el = document.getElementById('alert-pw');
+    var pw = el ? el.value : '';
+    try {
+      if (pw) localStorage.setItem('app_password', pw);
+      else pw = localStorage.getItem('app_password') || '';
+    } catch (e) {}
+    return pw;
+  }
+  function getEmail() {
+    var el = document.getElementById('alert-email');
+    return (el ? el.value.trim() : '') || localStorage.getItem(EMAIL_KEY) || '';
+  }
+  function headers() {
+    var h = {'Content-Type': 'application/json'};
+    var pw = getPw();
+    if (pw) h['X-App-Password'] = pw;
+    return h;
+  }
+
+  function saveAlertEmail() {
+    var el = document.getElementById('alert-email');
+    var email = el ? el.value.trim() : '';
+    var status = document.getElementById('alert-status');
+    if (!email || !email.includes('@')) {
+      if (status) status.textContent = 'Please enter a valid email address.';
+      return;
+    }
+    localStorage.setItem(EMAIL_KEY, email);
+    if (status) status.textContent = 'Email saved. You can now follow tickers below.';
+    loadSubscriptions(email);
+  }
+  window.saveAlertEmail = saveAlertEmail;
+
+  var followed = new Set(JSON.parse(localStorage.getItem(SUBS_KEY) || '[]'));
+
+  function renderFollowedChips() {
+    var container = document.getElementById('followed-tickers');
+    if (!container) return;
+    container.innerHTML = '';
+    followed.forEach(function(ticker) {
+      var chip = document.createElement('span');
+      chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:#1c1c1e;border:1px solid #4f46e5;border-radius:20px;padding:4px 12px;font-size:12px;color:#818cf8';
+      chip.innerHTML = ticker + ' <button onclick="window.unfollowTicker(\'' + ticker + '\')" style="background:none;border:none;color:#71717a;cursor:pointer;font-size:14px;padding:0;line-height:1">\xd7</button>';
+      container.appendChild(chip);
+    });
+  }
+
+  function updateFollowButtonStates() {
+    document.querySelectorAll('[data-follow-ticker]').forEach(function(btn) {
+      var t = btn.dataset.followTicker;
+      if (followed.has(t)) {
+        btn.textContent = '🔔 Following';
+        btn.style.cssText = 'border:1px solid #4f46e5;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;background:#1c1c1e;color:#818cf8';
+      } else {
+        btn.textContent = '🔕 Follow';
+        btn.style.cssText = 'border:1px solid #4f46e5;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;background:#4f46e5;color:#fff';
+      }
+    });
+  }
+
+  async function loadSubscriptions(email) {
+    if (!email) return;
+    try {
+      var r = await fetch('/api/signal/subscriptions/' + encodeURIComponent(email), {headers: headers()});
+      if (r.ok) {
+        var data = await r.json();
+        followed = new Set(data.tickers || []);
+        localStorage.setItem(SUBS_KEY, JSON.stringify(Array.from(followed)));
+        renderFollowedChips();
+        updateFollowButtonStates();
+      }
+    } catch(e) { console.warn('subscriptions fetch failed', e); }
+  }
+
+  async function followTicker(ticker) {
+    var email = getEmail();
+    var status = document.getElementById('alert-status');
+    if (!email) { if (status) status.textContent = 'Enter and save your email first.'; return; }
+    try {
+      var r = await fetch('/api/signal/subscribe', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({email: email, ticker: ticker})
+      });
+      if (r.ok) {
+        followed.add(ticker);
+        localStorage.setItem(SUBS_KEY, JSON.stringify(Array.from(followed)));
+        renderFollowedChips(); updateFollowButtonStates();
+        if (status) status.textContent = 'Now following ' + ticker + '. Email alerts on new Form 4 filings.';
+      } else {
+        var err = await r.json().catch(function(){return {};});
+        if (status) status.textContent = 'Error: ' + (err.detail || r.status);
+      }
+    } catch(e) { if (status) status.textContent = 'Network error.'; }
+  }
+  window.followTicker = followTicker;
+
+  async function unfollowTicker(ticker) {
+    var email = getEmail();
+    var status = document.getElementById('alert-status');
+    if (!email) { if (status) status.textContent = 'Enter and save your email first.'; return; }
+    try {
+      var r = await fetch('/api/signal/subscribe', {
+        method: 'DELETE', headers: headers(),
+        body: JSON.stringify({email: email, ticker: ticker})
+      });
+      if (r.ok) {
+        followed.delete(ticker);
+        localStorage.setItem(SUBS_KEY, JSON.stringify(Array.from(followed)));
+        renderFollowedChips(); updateFollowButtonStates();
+        if (status) status.textContent = 'Unfollowed ' + ticker + '.';
+      }
+    } catch(e) { if (status) status.textContent = 'Network error.'; }
+  }
+  window.unfollowTicker = unfollowTicker;
+
+  function addFollowButtonsToRows() {
+    document.querySelectorAll('#tbody tr').forEach(function(row) {
+      var cells = row.querySelectorAll('td');
+      if (!cells.length || row.querySelector('[data-follow-ticker]')) return;
+      var ticker = cells[0] ? cells[0].textContent.trim() : '';
+      if (!ticker) return;
+      var td = document.createElement('td');
+      td.style.cssText = 'padding:4px 8px;white-space:nowrap';
+      var btn = document.createElement('button');
+      btn.dataset.followTicker = ticker;
+      btn.addEventListener('click', function() {
+        if (followed.has(ticker)) unfollowTicker(ticker); else followTicker(ticker);
+      });
+      td.appendChild(btn);
+      row.appendChild(td);
+    });
+    updateFollowButtonStates();
+  }
+
+  var tbody = document.getElementById('tbody');
+  if (tbody) new MutationObserver(addFollowButtonsToRows).observe(tbody, {childList: true, subtree: false});
+
+  var savedEmail = localStorage.getItem(EMAIL_KEY);
+  if (savedEmail) {
+    var input = document.getElementById('alert-email');
+    if (input) input.value = savedEmail;
+    loadSubscriptions(savedEmail);
+  }
+  renderFollowedChips();
+})();
+</script>
 </body>
 </html>
